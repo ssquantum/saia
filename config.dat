@@ -1,5 +1,5 @@
 // list of required directories for SAIA
-image storage path	--C:\Users\qgtx64\DocumentsCDrive\Python Scripts\SAIA\TestImages
-log file path		--C:\Users\qgtx64\DocumentsCDrive\Python Scripts\SAIA\
-dexter sync path	--
-image read path		--C:\Users\qgtx64\DocumentsCDrive\Python Scripts\TestSingleAtomImages
+image storage path	--C:\Users\Lab\Documents\Andor\Image Analyser\Results
+log file path		--C:\Users\Lab\Documents\Andor\Image Analyser\Logs
+dexter sync file	--Y:\currentfile
+image read path		--C:\Users\Lab\Documents\Andor\data

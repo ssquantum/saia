@@ -8,14 +8,12 @@ Stefan Spence 26/02/19
  - plot a histogram of signal counts, which defines the threshold
  - save file references to easily re-analyse data
 
-Assume that the first peak in the histogram is the background, 
-then that the frequencies drop to zero and further peaks can be distinguished
-after this point
+Assume that there are two peaks in the histogram which are separated by a 
+region of zeros
 
-Note that the images supplied should be an ROI so that we can integrate over them.
 Assuming that image files are ASCII
 
-Use Qt to send the signal from the watchdog to 
+Use Qt to send the signal from the watchdog to a real-time plot
 """
 import os
 import sys
@@ -94,7 +92,7 @@ class system_event_handler(FileSystemEventHandler, QThread):
                 self.dfn = str(int(sync_file.read()))
             
             # copy file with labeling: [species]_[date]_[Dexter file #]
-            new_file_name = self.image_storage_path+r'\Species_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
+            new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
             try:
                 shutil.copyfile(event.src_path, new_file_name)
             except PermissionError:
@@ -184,6 +182,11 @@ class image_handler:
         self.max_count = 2**16          # max count expected from the image
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts from atom
+        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
+        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
+        self.xc = 0                     # ROI centre x position 
+        self.yc = 0                     # ROI centre y position
+        self.roi_size = -1              # ROI length in pixels. default -1 takes the whole image
         self.thresh = 1                 # initial threshold for atom detection
         self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
         # file label list length < integrated counts so that no data is lost when extra spaces have to be appended
@@ -196,8 +199,10 @@ class image_handler:
         try:
             self.add_count(im_name)
             
-        except IndexError:
+        except IndexError: # this is a bad exception - the error might be from a bad ROI rather than reaching the end of the arrays
             self.counts = np.append(self.counts, np.zeros(self.n))
+            self.xc = np.append(self.xc, np.zeros(self.n))
+            self.yc = np.append(self.yc, np.zeros(self.n))
             self.files += [None]*self.n
             
             self.add_count(im_name)
@@ -205,16 +210,27 @@ class image_handler:
     def add_count(self, im_name):
         """Fill the next index of the counts and files arrays"""
         # im_vals = np.array(Image.open(im_name)) # for bmp images
-        self.im_vals = np.genfromtxt(im_name, delimiter=',')[:,:-1]  # ASCII image file: the last column is empty, comes out as NaN
+        
+        # could speed up by removing this if statement by having two different functions:
+        # then the bool toggle to use the ROI changes which function is used.
+        if self.roi_size > 0:
+            self.im_vals = np.genfromtxt(im_name, delimiter=',')[self.yc-self.roi_size//2:
+            self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]  # array of pixel values in ROI
+        else:
+            self.im_vals = np.genfromtxt(im_name, delimiter=',')[:,:-1]  # ASCII image file: the last column is empty, comes out as NaN
         
         # sum the counts in the image (which should already be an ROI)
         self.counts[self.im_num] = np.sum(self.im_vals)
         
         # naming convention: [Species]_[date]_[Dexter file #]
         self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
+        
+        # find the position of the largest pixel
+        # note that the statistics of the background are undermined by always taking the max.
+        self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
+        
         self.im_num += 1
         
-        # xc, yc = np.where(im_vals == np.max(im_vals))
         # probability 6e-7 of being outside of 5 sigma
         # threshold_estimate = np.mean(im_vals) + 5*np.std(im_vals, ddof=1)
             
@@ -222,7 +238,7 @@ class image_handler:
         """Plot a histogram of the photon counts, determine a threshold for 
         single atom presence.
         """
-        if np.size(self.bin_array) > 0:
+        if np.size(self.bin_array) > 0: 
             occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
         else:
             occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
@@ -244,6 +260,24 @@ class image_handler:
         
         return bins, occ, self.thresh
         
+    def set_roi(self, im_name='', dimensions=[]):
+        """Set the ROI for the image either by finding the position of the max 
+        in the file im_name, or by taking user supplied dimensions [xc, yc, 
+        roi_size]. The default is to use supplied dimensions."""
+        if np.size(dimensions) != 0:
+            self.xc, self.yc, self.roi_size = list(map(int, dimensions))
+            return 1
+            
+        elif len(im_name) != 0:
+            # presume the supplied image has an atom in and take the max
+            # pixel's position at the centre of the ROI
+            im_vals = np.genfromtxt(im_name, delimiter=',')[:,:-1]
+            self.xc, self.yc = np.where(im_vals == np.max(im_vals))
+            return 1
+            
+        else:
+            return 0
+        
     def save_state(self, save_file_name):
         """Save the processed data to csv"""
         self.histogram() # update the threshold estimate
@@ -252,11 +286,12 @@ class image_handler:
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
         
         out_arr = np.array((self.files[:self.im_num], 
-                    self.counts[:self.im_num], self.atom[:self.im_num])).T
+                    self.counts[:self.im_num], self.atom[:self.im_num], self.xc_list, self.yc_list)).T
                     
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
-                header='File, Counts, Atom Detected (threshold=%s)'%int(self.thresh))
+                header='File, Counts, Atom Detected (threshold=%s), X-position (pixel), Y-position (pixel)'%int(self.thresh))
             
+
 ####    ####    ####    ####
 
 # main GUI window contains all the widgets                
@@ -333,16 +368,49 @@ class main_window(QMainWindow):
         self.num_bins_edit.textChanged[str].connect(self.bins_text_edit)
         self.num_bins_edit.setValidator(double_validator)
         
+        # user chooses whether to use automatic or manual binning (default automatic)
         self.bins_toggle = QPushButton('Manual Binning', self)
         self.bins_toggle.setCheckable(True)
         self.bins_toggle.clicked[bool].connect(self.set_bins)
         grid.addWidget(self.bins_toggle, 0,7, 1,1)
         
-        # display the last image taken
-        # self.im_canvas = pg.ImageView()
-        # self.im_canvas.show()
-
-        self.setGeometry(150, 150, 700, 600)
+        # centre of ROI x position
+        xc_label = QLabel('ROI x_c: ', self)
+        grid.addWidget(xc_label, 0,8, 1,1)
+        self.roi_x_edit = QLineEdit(self)
+        grid.addWidget(self.roi_x_edit, 0,9, 1,1)
+        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_x_edit.setValidator(double_validator)
+        
+        # centre of ROI y position
+        yc_label = QLabel('ROI y_c: ', self)
+        grid.addWidget(yc_label, 0,10, 1,1)
+        self.roi_y_edit = QLineEdit(self)
+        grid.addWidget(self.roi_y_edit, 0,11, 1,1)
+        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_y_edit.setValidator(double_validator)
+        
+        # ROI size
+        l_label = QLabel('ROI size: ', self)
+        grid.addWidget(l_label, 0,12, 1,1)
+        self.roi_l_edit = QLineEdit(self)
+        grid.addWidget(self.roi_l_edit, 0,13, 1,1)
+        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_l_edit.setValidator(double_validator)
+        
+        # toggle to continuously plot images as they come in
+        self.im_show_toggle = QPushButton('Auto-display last image', self)
+        self.im_show_toggle.setCheckable(True)
+        self.im_show_toggle.clicked[bool].connect(self.set_im_show)
+        grid.addWidget(self.im_show_toggle, 0,14, 1,1)
+        
+        # display last image if toggle is True
+        self.im_canvas = pg.ImageView()
+        self.im_canvas.show()
+        grid.addWidget(self.im_canvas, 1,9, 5,5)
+        
+        # choose main window position and dimensions: (xpos,ypos,width,height)
+        self.setGeometry(100, 100, 800, 700)
         self.setWindowTitle('Single Atom Image Analyser')
 
     def init_DW(self):
@@ -362,6 +430,27 @@ class main_window(QMainWindow):
         self.dir_watcher.event_handler.event_path.connect(self.update_plot)
         self.dw_status_label.setText("Running")
         
+    def set_im_show(self, toggle):
+        """If the toggle is True, always update the widget with the last image"""
+        if toggle:
+            self.dir_watcher.event_handler.event_path.connect(self.update_im)
+        else:
+            try: 
+                self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
+            except Exception: pass # if it's already been disconnected 
+            
+        
+    def roi_text_edit(self, text):
+        """Update the ROI position and size every time a text edit is made by
+        the user to one of the line edit widgets"""
+        new_vals = [self.roi_x_edit.text(),
+                            self.roi_y_edit.text(), self.roi_l_edit.text()]
+        if any([v == '' for v in new_vals]):
+            new_vals = [0, 0, -1] # default takes the whole image
+        
+        self.image_handler.set_roi(list(map(float, new_vals)))
+        
+        
     def bins_text_edit(self, text):
         """Update the histogram bins every time a text edit is made by the user
         to one of the line edit widgets"""
@@ -376,9 +465,9 @@ class main_window(QMainWindow):
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[2] == '' and self.image_handler.im_num > 0:
                 new_vals[2] = 20 + self.image_handler.im_num // 20
-            if self.image_handler.im_num == 0:
+            if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
                 new_vals = [0, 1, 10]
-            min_bin, max_bin, num_bins = [float(x) for x in new_vals]
+            min_bin, max_bin, num_bins = list(map(float, new_vals))
             
             # set the new values for the bins of the image handler
             self.image_handler.bin_array = np.linspace(min_bin, max_bin, num_bins)
@@ -403,6 +492,14 @@ class main_window(QMainWindow):
         self.hist_canvas.plot(bins, occ, stepMode=True,
                                 fillLevel=0, brush = (250,250,250,250)) # histogram
         self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen=1) # threshold line
+        
+    def update_im(self, event_path):
+        """Receive the event path emitted from the system event handler signal
+        display the image from the file in the image canvas"""
+        im_vals = np.genfromtxt(event_path, delimiter=',')[:,:-1]
+        self.im_canvas.setImage(im_vals)
+        
+        # draw lines for the ROI
         
     def update_plot(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -448,7 +545,7 @@ class main_window(QMainWindow):
             
         else:
             event.ignore()        
-            
+
             
 if __name__ == "__main__":
     # if running in IPython then creating an app instance isn't necessary...
