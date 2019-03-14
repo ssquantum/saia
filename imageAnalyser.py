@@ -24,7 +24,7 @@ import shutil
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
 import time
 from PyQt4.QtCore import QThread, pyqtSignal
-from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel,
+from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
         QGridLayout, QSizePolicy, QMainWindow, QMessageBox, QLineEdit, 
         QDoubleValidator) 
 from watchdog.observers import Observer
@@ -180,6 +180,7 @@ class image_handler:
     analysed exceeds (n-10) of this length then append another n"""
     def __init__(self):
         self.max_count = 2**16          # max count expected from the image
+        self.delim = ' '                # delimieter to use when opening files
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts from atom
         self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
@@ -187,6 +188,7 @@ class image_handler:
         self.xc = 0                     # ROI centre x position 
         self.yc = 0                     # ROI centre y position
         self.roi_size = -1              # ROI length in pixels. default -1 takes the whole image
+        self.pic_size = 64              # number of pixels in an image
         self.thresh = 1                 # initial threshold for atom detection
         self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
         # file label list length < integrated counts so that no data is lost when extra spaces have to be appended
@@ -195,7 +197,18 @@ class image_handler:
         self.im_vals = np.array([])     # the data from the last image is accessible to an image_handler instance
         self.bin_array = []             # if bins for the histogram are supplied, plotting can be faster
         
+    def set_pic_size(self, im_name):
+        """Set the pic size by looking at the number of columns in a file"""
+        im_vals = np.genfromtxt(im_name, delimeter=self.delim)
+        self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row #
+        
+    def load_full_im(self, im_name):
+        """return an array with the values of the image"""
+        return np.loadtxt(im_name, delimiter=self.delim,
+                              usecols=range(1,self.pic_size+1))
+        
     def process(self, im_name):
+        """Get the data from an image """
         try:
             self.add_count(im_name)
             
@@ -214,21 +227,36 @@ class image_handler:
         # could speed up by removing this if statement by having two different functions:
         # then the bool toggle to use the ROI changes which function is used.
         if self.roi_size > 0:
-            self.im_vals = np.genfromtxt(im_name, delimiter=',')[self.yc-self.roi_size//2:
+            self.im_vals = np.genfromtxt(im_name, delimiter=self.delim)[self.yc-self.roi_size//2:
             self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]  # array of pixel values in ROI
         else:
-            self.im_vals = np.genfromtxt(im_name, delimiter=',')[:,:-1]  # ASCII image file: the last column is empty, comes out as NaN
+            # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
+            # self.im_vals = np.genfromtxt(im_name, delimiter=' ')[:,1:] # first column gives column number
+            # might fail if trying to go really fast because the file hasn't been filled with data yet
+            self.im_vals = self.load_full_im(im_name)
+            if self.im_vals.size:
+                pass # checking that the array isn't empty
+            else:
+                print("File was empty, waiting 0.01s and trying again")
+                time.sleep(0.01)
+                self.im_vals = self.load_full_im(im_name)
         
         # sum the counts in the image (which should already be an ROI)
-        self.counts[self.im_num] = np.sum(self.im_vals)
+        # self.counts[self.im_num] = np.sum(self.im_vals)
+        # take the max count in the image (undermines the statistics of the background)
+        self.counts[self.im_num] = np.max(self.im_vals)
         
         # naming convention: [Species]_[date]_[Dexter file #]
         self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
         
         # find the position of the largest pixel
         # note that the statistics of the background are undermined by always taking the max.
-        self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
-        
+        try:
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
+        except ValueError: # same maximum value found in more that one position
+            xcs, ycs = np.where(self.im_vals == np.max(self.im_vals))
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
+            
         self.im_num += 1
         
         # probability 6e-7 of being outside of 5 sigma
@@ -271,8 +299,8 @@ class image_handler:
         elif len(im_name) != 0:
             # presume the supplied image has an atom in and take the max
             # pixel's position at the centre of the ROI
-            im_vals = np.genfromtxt(im_name, delimiter=',')[:,:-1]
-            self.xc, self.yc = np.where(im_vals == np.max(im_vals))
+            # im_vals = np.genfromtxt(im_name, delimiter=self.delim)[:,:-1]
+            # self.xc, self.yc = np.where(im_vals == np.max(im_vals))
             return 1
             
         else:
@@ -335,36 +363,49 @@ class main_window(QMainWindow):
         # main subplot of histogram
         self.hist_canvas = pg.PlotWidget()
         self.hist_canvas.setTitle("Histogram of CCD counts")
-        grid.addWidget(self.hist_canvas, 1,0, 5,8)  # plot spans 5 rows/columns
-        
-        # adjustable parameters: min/max counts, number of bins
-        bins_label = QLabel('Histogram Binning:', self)
-        grid.addWidget(bins_label, 0,0, 1,1)
+        grid.addWidget(self.hist_canvas, 1,0, 5,7)  # plot spans 5 rows/columns
         
         # make sure user input is float:
         double_validator = QDoubleValidator()
         
+        
+#        # menubar allows you to load data
+#        menubar = self.menuBar()
+#        file_menu = menubar.addMenu('File')
+#        
+#        save_hist = QAction('Save histogram', self) # save current hist to csv
+#        
+#        load_menu = QMenu('Load Data', self)  # drop down menu for loading hist
+#        load_dir = QAction('From Directory', self) # from dir of images
+#        load_menu.addAction(load_dir)
+#        load_csv = QAction('From csv', self) # from csv of hist data
+#        load_menu.addAction(load_csv)
+#        
+#        file_menu.addAction(save_hist)
+#        file_menu.addMenu(load_menu)
+        
+        # adjustable parameters: min/max counts, number of bins
         # min counts:
         min_counts_label = QLabel('Min. Counts: ', self)
-        grid.addWidget(min_counts_label, 0,1, 1,1)
+        grid.addWidget(min_counts_label, 0,0, 1,1)
         self.min_counts_edit = QLineEdit(self)
-        grid.addWidget(self.min_counts_edit, 0,2, 1,1)
+        grid.addWidget(self.min_counts_edit, 0,1, 1,1)
         self.min_counts_edit.textChanged[str].connect(self.bins_text_edit)
         self.min_counts_edit.setValidator(double_validator)
         
         # max counts:
         max_counts_label = QLabel('Max. Counts: ', self)
-        grid.addWidget(max_counts_label, 0,3, 1,1)
+        grid.addWidget(max_counts_label, 0,2, 1,1)
         self.max_counts_edit = QLineEdit(self)
-        grid.addWidget(self.max_counts_edit, 0,4, 1,1)
+        grid.addWidget(self.max_counts_edit, 0,3, 1,1)
         self.max_counts_edit.textChanged[str].connect(self.bins_text_edit)
         self.max_counts_edit.setValidator(double_validator)
         
         # number of bins
         num_bins_label = QLabel('# Bins: ', self)
-        grid.addWidget(num_bins_label, 0,5, 1,1)
+        grid.addWidget(num_bins_label, 0,4, 1,1)
         self.num_bins_edit = QLineEdit(self)
-        grid.addWidget(self.num_bins_edit, 0,6, 1,1)
+        grid.addWidget(self.num_bins_edit, 0,5, 1,1)
         self.num_bins_edit.textChanged[str].connect(self.bins_text_edit)
         self.num_bins_edit.setValidator(double_validator)
         
@@ -372,45 +413,59 @@ class main_window(QMainWindow):
         self.bins_toggle = QPushButton('Manual Binning', self)
         self.bins_toggle.setCheckable(True)
         self.bins_toggle.clicked[bool].connect(self.set_bins)
-        grid.addWidget(self.bins_toggle, 0,7, 1,1)
+        grid.addWidget(self.bins_toggle, 0,6, 1,1)
         
-        # centre of ROI x position
-        xc_label = QLabel('ROI x_c: ', self)
-        grid.addWidget(xc_label, 0,8, 1,1)
-        self.roi_x_edit = QLineEdit(self)
-        grid.addWidget(self.roi_x_edit, 0,9, 1,1)
-        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_x_edit.setValidator(double_validator)
-        
-        # centre of ROI y position
-        yc_label = QLabel('ROI y_c: ', self)
-        grid.addWidget(yc_label, 0,10, 1,1)
-        self.roi_y_edit = QLineEdit(self)
-        grid.addWidget(self.roi_y_edit, 0,11, 1,1)
-        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_y_edit.setValidator(double_validator)
-        
-        # ROI size
-        l_label = QLabel('ROI size: ', self)
-        grid.addWidget(l_label, 0,12, 1,1)
-        self.roi_l_edit = QLineEdit(self)
-        grid.addWidget(self.roi_l_edit, 0,13, 1,1)
-        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_l_edit.setValidator(double_validator)
+        # get user to set the image size in pixels
+        size_label = QLabel('Image Size in Pixels: ', self)
+        grid.addWidget(size_label, 0,8, 1,1)
+        self.pic_size_edit = QLineEdit(self)
+        grid.addWidget(self.pic_size_edit, 0,9, 1,1)
+        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # default
+        self.pic_size_edit.textChanged[str].connect(self.pic_size_text_edit)
+        self.pic_size_edit.setValidator(double_validator)
         
         # toggle to continuously plot images as they come in
         self.im_show_toggle = QPushButton('Auto-display last image', self)
         self.im_show_toggle.setCheckable(True)
         self.im_show_toggle.clicked[bool].connect(self.set_im_show)
-        grid.addWidget(self.im_show_toggle, 0,14, 1,1)
+        grid.addWidget(self.im_show_toggle, 0,10, 1,1)
+        
+        im_grid_pos = 8 # x grid position. leave enought space for the histogram
+        # centre of ROI x position
+        xc_label = QLabel('ROI x_c: ', self)
+        grid.addWidget(xc_label, 7,im_grid_pos, 1,1)
+        self.roi_x_edit = QLineEdit(self)
+        grid.addWidget(self.roi_x_edit, 7,im_grid_pos+1, 1,1)
+        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_x_edit.setValidator(double_validator)
+         
+        # centre of ROI y position
+        yc_label = QLabel('ROI y_c: ', self)
+        grid.addWidget(yc_label, 7,im_grid_pos+2, 1,1)
+        self.roi_y_edit = QLineEdit(self)
+        grid.addWidget(self.roi_y_edit, 7,im_grid_pos+3, 1,1)
+        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_y_edit.setValidator(double_validator)
+        
+        # ROI size
+        l_label = QLabel('ROI size: ', self)
+        grid.addWidget(l_label, 7,im_grid_pos+4, 1,1)
+        self.roi_l_edit = QLineEdit(self)
+        grid.addWidget(self.roi_l_edit, 7,im_grid_pos+5, 1,1)
+        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_l_edit.setValidator(double_validator)
         
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
+        grid.addWidget(self.im_canvas, 1,im_grid_pos, 5,8)
         self.im_canvas.show()
-        grid.addWidget(self.im_canvas, 1,9, 5,5)
+
+        
+        self.roi_plot = self.im_canvas.getRoiPlot()
+        # self.roi_plot.sigRegionChangeFinished.connect(self.update_roi) # signal emitted when user stops dragging ROI
         
         # choose main window position and dimensions: (xpos,ypos,width,height)
-        self.setGeometry(100, 100, 800, 700)
+        self.setGeometry(100, 100, 1200, 700)
         self.setWindowTitle('Single Atom Image Analyser')
 
     def init_DW(self):
@@ -438,17 +493,41 @@ class main_window(QMainWindow):
             try: 
                 self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
             except Exception: pass # if it's already been disconnected 
-            
         
+    def user_roi(self, pos):
+        """The user drags an ROI and this updates the ROI centre and width"""
+        x0, y0 = self.roi_plot.pos  # lower left corner of bounding rectangle
+        xw, yw = self.roi_plot.size # widths
+        l = int(0.5*(xw+yw))  # want a square ROI
+        xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
+        self.image_handler.set_roi([xc, yc, l])
+        self.roi_x_edit.setText(str(xc))
+        self.roi_y_edit.setText(str(yc))
+        self.roi_l_edit.setText(str(l))
+            
+    def pic_size_text_edit(self, text):
+        """Update the specified size of an image in pixels when the user 
+        edits the text in the line edit widget"""
+        self.image_handler.pic_size = int(text)
+        
+    
     def roi_text_edit(self, text):
         """Update the ROI position and size every time a text edit is made by
         the user to one of the line edit widgets"""
-        new_vals = [self.roi_x_edit.text(),
+        [xc, yc, l] = [self.roi_x_edit.text(),
                             self.roi_y_edit.text(), self.roi_l_edit.text()]
-        if any([v == '' for v in new_vals]):
-            new_vals = [0, 0, -1] # default takes the whole image
+        if any([v == '' for v in [xc, yc, l]]):
+            xc, yc, l = 0, 0, -1 # default takes the whole image
         
-        self.image_handler.set_roi(list(map(float, new_vals)))
+        if xc - l//2 < 0 or yc - l//2 < 0:
+            l = 2*min([xc, yc])  # can't have the boundary go off the edge
+        
+        self.image_handler.set_roi(list(map(int, [xc, yc, l])))
+        print("ROI: ", [xc, yc, l])
+        
+        # update ROI on image canvas
+        self.roi_plot.setPos((xc - l//2, yc - l//2))
+        self.roi_plot.setSize((l, l))
         
         
     def bins_text_edit(self, text):
@@ -467,7 +546,7 @@ class main_window(QMainWindow):
                 new_vals[2] = 20 + self.image_handler.im_num // 20
             if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
                 new_vals = [0, 1, 10]
-            min_bin, max_bin, num_bins = list(map(float, new_vals))
+            min_bin, max_bin, num_bins = list(map(int, new_vals))
             
             # set the new values for the bins of the image handler
             self.image_handler.bin_array = np.linspace(min_bin, max_bin, num_bins)
@@ -496,10 +575,9 @@ class main_window(QMainWindow):
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
         display the image from the file in the image canvas"""
-        im_vals = np.genfromtxt(event_path, delimiter=',')[:,:-1]
+        im_vals = self.image_handler.load_full_im(event_path)
         self.im_canvas.setImage(im_vals)
         
-        # draw lines for the ROI
         
     def update_plot(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -518,6 +596,22 @@ class main_window(QMainWindow):
         
         self.plot_current_hist()
         self.plot_time = time.time() - t2
+        
+    def print_times(self, unit="s"):
+        """Display the times measured for functions"""
+        scale = 1
+        if unit == "ms":
+            scale *= 1e3
+        elif unit == "us" or unit == "microseconds":
+            scale *= 1e6
+        else:
+            unit = "s"
+        if self.dir_watcher: # this is None if dir_watcher isn't initiated
+            print("File copying event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("Image processing duration: %.4g "%(self.int_time*scale)+unit)
+            print("Image plotting duration: %.4g "%(self.plot_time*scale)+unit)
+        else: 
+            print("Initiate the directory watcher before testing timings")
 
 
     def closeEvent(self, event):
