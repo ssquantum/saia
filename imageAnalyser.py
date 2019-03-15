@@ -25,7 +25,7 @@ os.chdir(os.path.dirname(os.path.realpath(__file__)))
 import time
 from PyQt4.QtCore import QThread, pyqtSignal
 from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
-        QGridLayout, QSizePolicy, QMainWindow, QMessageBox, QLineEdit, 
+        QGridLayout, QMainWindow, QMessageBox, QLineEdit, 
         QDoubleValidator, QComboBox) 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -91,7 +91,7 @@ class system_event_handler(FileSystemEventHandler, QThread):
             with open(self.dexter_sync_file_name, 'r') as sync_file:
                 self.dfn = str(int(sync_file.read()))
             
-            # copy file with labeling: [species]_[date]_[Dexter file #]
+            # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
             new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
             try:
                 shutil.copyfile(event.src_path, new_file_name)
@@ -116,29 +116,9 @@ class dir_watcher(QThread):
     def __init__(self):
         super().__init__()
         
-        # load config file for directories or prompt user if first time setup
-        try:
-            with open('./config.dat', 'r') as config_file:
-                config_data = config_file.read().split("\n")
-        except FileNotFoundError:
-            print("config.dat file not found. This file is required for directory references.")
-            with open(input('Please supply the absolute path to config.dat\t\t'), 'r') as config_file:
-                config_data = config_file.read().split("\n")
-                
-        for row in config_data:
-            if "image storage path" in row:
-                self.image_storage_path = row.split('--')[-1] # where image files are saved
-            elif "log file path" in row:
-                self.log_file_path = row.split('--')[-1]      # where dat files of saved data and log files are saved
-            elif "dexter sync file" in row:
-                self.dexter_sync_file_name = row.split('--')[-1]   # where the txt from Dexter with the latest file # is saved
-            elif "image read path" in row:
-                self.image_read_path = row.split('--')[-1]    # where camera images are stored just after acquisition
-        
-        print("Image storage path: ", self.image_storage_path)
-        print("Log file path: ", self.log_file_path)
-        print("Dexter sync file: ", self.dexter_sync_file_name)
-        print("Directory to watch for new files: ", self.image_read_path)
+        # load paths used from config.dat
+        self.dirs_list = self.get_dirs()  # handy list contains them all
+        self.image_storage_path, self.log_file_path, self.dexter_sync_file_name, self.image_read_path = self.dirs_list
         
         # create the watchdog object
         self.observer = Observer()
@@ -157,17 +137,48 @@ class dir_watcher(QThread):
         # initiate observer
         self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
         self.observer.start()
+    
+    @staticmethod 
+    def get_dirs():
+        """Load the paths used from the config.dat file or prompt user if 
+        it can't be found"""
+        # load config file for directories or prompt user if first time setup
+        try:
+            with open('./config.dat', 'r') as config_file:
+                config_data = config_file.read().split("\n")
+        except FileNotFoundError:
+            print("config.dat file not found. This file is required for directory references.")
+            with open(input('Please supply the absolute path to config.dat\t\t'), 'r') as config_file:
+                config_data = config_file.read().split("\n")
+                
+        for row in config_data:
+            if "image storage path" in row:
+                image_storage_path = row.split('--')[-1] # where image files are saved
+            elif "log file path" in row:
+                log_file_path = row.split('--')[-1]      # where dat files of saved data and log files are saved
+            elif "dexter sync file" in row:
+                dexter_sync_file_name = row.split('--')[-1]   # where the txt from Dexter with the latest file # is saved
+            elif "image read path" in row:
+                image_read_path = row.split('--')[-1]    # where camera images are stored just after acquisition
+                
+        return [image_storage_path, log_file_path, dexter_sync_file_name, image_read_path]
         
+    @staticmethod
+    def print_dirs(image_storage_path, log_file_path, dexter_sync_file_name, image_read_path):
+        """Return a string containing information on the paths used"""
+        outstr = '// list of required directories for SAIA\n'
+        outstr += 'image storage path\t--'+image_storage_path+'\n'
+        outstr += 'log file path\t\t--'+log_file_path+'\n'
+        outstr += 'dexter sync file\t\t--'+dexter_sync_file_name+'\n'
+        outstr += 'image read path\t--'+image_read_path+'\n'
+        return outstr
+    
     def run(self):
         pass
         
     def save_config(self):
         with open('./config.dat', 'w+') as config_file:
-            config_file.write('// list of required directories for SAIA\n')
-            config_file.write('image storage path\t\t--'+self.image_storage_path+'\n')
-            config_file.write('log file path\t\t--'+self.log_file_path+'\n')
-            config_file.write('dexter sync file\t\t--'+self.dexter_sync_file_name+'\n')
-            config_file.write('image read path\t\t--'+self.image_read_path+'\n')
+            config_file.write(self.print_dirs(*self.dirs_list))
             
             
 ####    ####    ####    ####
@@ -209,7 +220,7 @@ class image_handler:
         #np.array(Image.open(im_name)) # for bmp images
         #np.genfromtxt(im_name, delimiter=self.delim)[:,1:] # first column gives column number
         return np.loadtxt(im_name, delimiter=self.delim,
-                              usecols=range(1,self.pic_size+1))
+                              usecols=range(1,self.pic_size-1))
         
     def process(self, im_name):
         """Get the data from an image """
@@ -384,7 +395,7 @@ class main_window(QMainWindow):
         grid.addWidget(dw_init_button, 7,0, 1,2)
 
         # label to show status of dir watcher
-        self.dw_status_label = QLabel('Stopped', self)
+        self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
         grid.addWidget(self.dw_status_label, 7,2, 1,1)
 
         # label to show last file analysed
@@ -506,21 +517,35 @@ class main_window(QMainWindow):
 
     def init_DW(self):
         """Ask the user if they want to start the dir watcher or not"""
+        dir_watcher_dirs = dir_watcher.get_dirs()
+        text = "Loaded from config.dat:\n"
+        text += dir_watcher.print_dirs(*dir_watcher_dirs)
+        text += "\nStart the directory watcher with these settings?"
         reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
-            "Start the directory watcher?", QMessageBox.Yes | QMessageBox.No, 
-                                    QMessageBox.No)
-
+            text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+         
         if reply == QMessageBox.Yes:
             self.reset_DW()
             
     def reset_DW(self):
         """Initiate the dir watcher (restarts a new instance if there is already
         one running, since it crashes if there is an exception."""
-        # if not self.dir_watcher: 
+        if self.dir_watcher: # check if there is a current thread
+            self.dir_watcher.observer.stop()
+            del self.dir_watcher    # ensure that the old thread stops
+            self.dw_status_label.setText("Stopped")
+            
         self.dir_watcher = dir_watcher()
         self.dir_watcher.event_handler.event_path.connect(self.update_plot)
         self.dw_status_label.setText("Running")
-        
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText("Directory Watcher initiated with settings:\n"+
+            "date\t\t\t--"+self.dir_watcher.date+"\n"+
+            self.dir_watcher.print_dirs(*self.dir_watcher.dirs_list))
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+                
     #### #### user input functions #### #### 
     
     def user_roi(self, pos):
