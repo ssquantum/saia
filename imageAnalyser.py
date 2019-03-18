@@ -455,7 +455,7 @@ class main_window(QMainWindow):
         self.bins_toggle = QComboBox(self)
         self.bins_toggle.addItem('Auto Binning')
         self.bins_toggle.addItem('Manual Binning')
-        # self.bins_toggle.addItem('No Update')
+        self.bins_toggle.addItem('No Update')
         self.bins_toggle.activated[str].connect(self.set_bins)
         grid.addWidget(self.bins_toggle, 0,6, 1,1)
         
@@ -501,14 +501,14 @@ class main_window(QMainWindow):
         
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
-        
         grid.addWidget(self.im_canvas, 1,im_grid_pos, 5,8)
+        self.roi = pg.ROI((0,0), (10,10)) # 
+        self.roi.addTranslateHandle(10)  # allows the user to drag the ROI
+        self.roi.addScaleHandle((0,0), (0,0)) # user can resize the ROI
+        self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
+        self.im_canvas.addItem(self.roi)
         self.im_canvas.show()
 
-        
-        self.roi_plot = self.im_canvas.getRoiPlot()
-        # self.roi_plot.sigRegionChangeFinished.connect(self.update_roi) # signal emitted when user stops dragging ROI
-        
         # choose main window position and dimensions: (xpos,ypos,width,height)
         self.setGeometry(100, 100, 1200, 700)
         self.setWindowTitle('Single Atom Image Analyser')
@@ -550,14 +550,14 @@ class main_window(QMainWindow):
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""
-        x0, y0 = self.roi_plot.pos  # lower left corner of bounding rectangle
-        xw, yw = self.roi_plot.size # widths
+        x0, y0 = self.roi.pos()  # lower left corner of bounding rectangle
+        xw, yw = self.roi.size() # widths
         l = int(0.5*(xw+yw))  # want a square ROI
         xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
-        self.image_handler.set_roi([xc, yc, l])
-        self.roi_x_edit.setText(str(xc))
-        self.roi_y_edit.setText(str(yc))
-        self.roi_l_edit.setText(str(l))
+        self.image_handler.set_roi(dimensions=[xc, yc, l])
+        # self.roi_x_edit.setText(str(xc)) # currently causes infinite loop
+        # self.roi_y_edit.setText(str(yc))
+        # self.roi_l_edit.setText(str(l))
             
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
@@ -572,16 +572,18 @@ class main_window(QMainWindow):
                             self.roi_y_edit.text(), self.roi_l_edit.text()]
         if any([v == '' for v in [xc, yc, l]]):
             xc, yc, l = 0, 0, -1 # default takes the whole image
+        else:
+            xc, yc, l = list(map(int, [xc, yc, l]))
         
         if xc - l//2 < 0 or yc - l//2 < 0:
             l = 2*min([xc, yc])  # can't have the boundary go off the edge
         
-        self.image_handler.set_roi(list(map(int, [xc, yc, l])))
-        print("ROI: ", [xc, yc, l])
+        self.image_handler.set_roi(dimensions=list(map(int, [xc, yc, l])))
+        print("ROI: ", [self.image_handler.xc, self.image_handler.yc, self.image_handler.roi_size])
         
         # update ROI on image canvas
-        self.roi_plot.setPos((xc - l//2, yc - l//2))
-        self.roi_plot.setSize((l, l))
+        self.roi.setPos(xc - l//2, yc - l//2)
+        self.roi.setSize(l, l)
         
         
     def bins_text_edit(self, text):
@@ -625,15 +627,32 @@ class main_window(QMainWindow):
         If the toggle is No Update, disconnect the dir watcher new event signal
         from the plot update."""
         if toggle == 'Manual Binning':
+            # disconnect the other signals if they've been set:
+            try:
+                self.dir_watcher.event_handler.event_path.disconnect(self.image_handler.process)
+            except Exception: pass
+            try:
+                self.dir_watcher.event_handler.event_path.disconnect(self.recent_label.setText)
+            except Exception: pass
             self.bins_text_edit('reset')            
         elif toggle == 'Auto Binning':
+            # disconnect the other signals if they've been set:
+            try:
+                self.dir_watcher.event_handler.event_path.disconnect(self.image_handler.process)
+            except Exception: pass
+            try:
+                self.dir_watcher.event_handler.event_path.disconnect(self.recent_label.setText)
+            except Exception: pass
             self.image_handler.bin_array = []
             self.plot_current_hist()
         elif toggle == 'No Update':
-            pass
-            # try: 
-            #     self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
-            # except Exception: pass # if it's already been disconnected 
+            try: 
+                self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
+            except Exception: pass # if it's already been disconnected 
+            
+            # just process the image and set the text of the most recent file
+            self.dir_watcher.event_handler.event_path.connect(self.image_handler.process)
+            self.dir_watcher.event_handler.event_path.connect(self.recent_label.setText) # might need a better label
             
     #### #### canvas functions #### #### 
         
@@ -657,9 +676,7 @@ class main_window(QMainWindow):
     def update_plot(self, event_path):
         """Receive the event path emitted from the system event handler signal
         process the file in the event path with the image handler and update
-        the figure
-        change bar heights for speed
-        Also preferably imshow the file"""
+        the figure"""
         # add the count
         t1 = time.time()
         self.image_handler.process(event_path)
@@ -722,7 +739,7 @@ class main_window(QMainWindow):
             
 if __name__ == "__main__":
     # if running in IPython then creating an app instance isn't necessary...
-    # app = QApplication(sys.argv)  
+    app = QApplication(sys.argv)  
     main_win = main_window()
     main_win.show()
-    # sys.exit(app.exec_())
+    sys.exit(app.exec_())
