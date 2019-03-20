@@ -251,7 +251,6 @@ class image_handler:
                 self.yc_list = np.append(self.yc_list, np.zeros(self.n))
                 self.atom = np.append(self.atom, np.zeros(self.n))
                 self.files = np.append(self.files, np.array([None]*self.n))
-                
             self.add_count(im_name)
 
     def add_int_count(self, im_name):
@@ -291,7 +290,7 @@ class image_handler:
         else:
             # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
             # might fail if trying to go really fast because the file hasn't been filled with data yet
-            if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
+           if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
                 self.im_vals = self.load_full_im(im_name)
             else:
                 print("File was empty, waiting 0.01s and trying again")
@@ -747,8 +746,8 @@ class main_window(QMainWindow):
         
         self.plot_current_hist()
         self.plot_time = time.time() - t2
-    
-    #### #### save and load data functions #### ####
+
+#### #### save and load data functions #### ####
 
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""

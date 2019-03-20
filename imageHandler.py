@@ -214,4 +214,3 @@ class image_handler:
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
                 header='File, Counts, Atom Detected (threshold=%s), X-pos (pix), Y-pos (pix), Mean Count, s.d.'
                 %int(self.thresh))
-            
