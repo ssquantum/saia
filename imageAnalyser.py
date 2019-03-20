@@ -23,10 +23,10 @@ import shutil
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
 import time
-from PyQt4.QtCore import QThread, pyqtSignal
-from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
-        QGridLayout, QMainWindow, QMessageBox, QLineEdit, 
-        QDoubleValidator, QComboBox) 
+from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
+        QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
+        QDoubleValidator, QComboBox, QMenu) 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -138,7 +138,7 @@ class dir_watcher(QThread):
         self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
         self.observer.start()
     
-    @staticmethod 
+    @staticmethod # static method can be accessed without making an instance of the class
     def get_dirs():
         """Load the paths used from the config.dat file or prompt user if 
         it can't be found"""
@@ -161,6 +161,8 @@ class dir_watcher(QThread):
             elif "image read path" in row:
                 image_read_path = row.split('--')[-1]    # where camera images are stored just after acquisition
                 
+        if os.path.split(dexter_sync_file_name)[0] == image_read_path:
+            print("WARNING: The directory watcher acts on all file change events, so the Dexter sync file path and image read path must be different.")
         return [image_storage_path, log_file_path, dexter_sync_file_name, image_read_path]
         
     @staticmethod
@@ -205,20 +207,32 @@ class image_handler:
         self.thresh = 1                 # initial threshold for atom detection
         self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
         # file label list length < integrated counts so that no data is lost when extra spaces have to be appended
-        self.files = np.array([None]*(self.n-10)) # labels of files. 
+        self.files = np.array([None]*(self.n)) # labels of files. 
         self.im_num = 0                 # number of images processed
         self.im_vals = np.array([])     # the data from the last image is accessible to an image_handler instance
         self.bin_array = []             # if bins for the histogram are supplied, plotting can be faster
         
     def set_pic_size(self, im_name):
         """Set the pic size by looking at the number of columns in a file"""
-        im_vals = np.genfromtxt(im_name, delimeter=self.delim)
-        self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row #
+        im_vals = np.genfromtxt(im_name, delimiter=self.delim)
+        self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row number
+
+    def reset_arrays(self):
+        """Reset all of the histogram array data to zero"""
+        self.files = np.array([None]*(self.n)) # labels of files. 
+        self.counts = np.zeros(self.n)  # integrated counts from atom
+        self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
+        self.std_count = np.zeros(self.n)  # list of standard deviation of counts in image
+        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
+        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
+        self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
+        self.im_num = 0                 # number of images processed
+        
         
     def load_full_im(self, im_name):
         """return an array with the values of the image"""
         #np.array(Image.open(im_name)) # for bmp images
-        #np.genfromtxt(im_name, delimiter=self.delim)[:,1:] # first column gives column number
+        # return np.genfromtxt(im_name, delimiter=self.delim)#[:,1:] # first column gives column number
         return np.loadtxt(im_name, delimiter=self.delim,
                               usecols=range(1,self.pic_size-1))
         
@@ -228,36 +242,61 @@ class image_handler:
             self.add_count(im_name)
             
         except IndexError: # this is a bad exception - the error might be from a bad ROI rather than reaching the end of the arrays
-            self.counts = np.append(self.counts, np.zeros(self.n))
-            self.mean_count = np.append(self.counts, np.zeros(self.n)) 
-            self.std_count = np.append(self.counts, np.zeros(self.n))
-            self.xc_list = np.append(self.xc_list, np.zeros(self.n))
-            self.yc_list = np.append(self.yc_list, np.zeros(self.n))
-            self.atom = np.append(self.atom, np.zeros(self.n))
-            self.files = np.append(self.files, np.array([None]*self.n))
-            
+            # filled the array of size n so add more elements
+            if self.im_num % (self.n - 10) == 0 and self.im_num > self.n / 2:
+                self.counts = np.append(self.counts, np.zeros(self.n))
+                self.mean_count = np.append(self.counts, np.zeros(self.n)) 
+                self.std_count = np.append(self.counts, np.zeros(self.n))
+                self.xc_list = np.append(self.xc_list, np.zeros(self.n))
+                self.yc_list = np.append(self.yc_list, np.zeros(self.n))
+                self.atom = np.append(self.atom, np.zeros(self.n))
+                self.files = np.append(self.files, np.array([None]*self.n))
             self.add_count(im_name)
+
+    def add_int_count(self, im_name):
+        """Fill in the next index of the counts by summing over the ROI region and then 
+        getting a counts/pixel. 
+        Fill in the next index of the file, xc, yc, mean, std arrays."""
+        self.im_vals = np.genfromtxt(im_name, delimiter=self.delim)[self.yc-self.roi_size//2:
+            self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]
+        # mean counts in the image (which should already be an ROI)
+        self.counts[self.im_num] = np.sum(self.im_vals) / np.size(self.im_vals)
+        
+        # naming convention: [Species]_[date]_[Dexter file #]
+        self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
+        
+        # find the position of the largest pixel
+        # note that the statistics of the background are undermined by always taking the max.
+        try:
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
+        except ValueError: # same maximum value found in more that one position
+            xcs, ycs = np.where(self.im_vals == np.max(self.im_vals))
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
+    
+        # background statistics: mean count and standard deviation across image
+        self.mean_count[self.im_num] = np.mean(self.im_vals)
+        self.std_count[self.im_num] = np.std(self.im_vals, ddof=1)
+        
+        self.im_num += 1
             
     def add_count(self, im_name):
-        """Fill the next index of the counts and files arrays"""
+        """Fill the next index of the counts with the max count in a pixel.
+        Fill in the next index of the file, xc, yc, mean, std arrays."""
         # could speed up by removing this if statement by having two different functions:
         # then the bool toggle to use the ROI changes which function is used.
         if self.roi_size > 0:
-            self.im_vals = np.genfromtxt(im_name, delimiter=self.delim)[self.yc-self.roi_size//2:
+            self.im_vals = self.load_full_im(im_name)[self.yc-self.roi_size//2:
             self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]  # array of pixel values in ROI
         else:
             # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
             # might fail if trying to go really fast because the file hasn't been filled with data yet
-            self.im_vals = self.load_full_im(im_name)
-            if self.im_vals.size:
-                pass # checking that the array isn't empty
+           if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
+                self.im_vals = self.load_full_im(im_name)
             else:
                 print("File was empty, waiting 0.01s and trying again")
                 time.sleep(0.01)
                 self.im_vals = self.load_full_im(im_name)
         
-        # sum the counts in the image (which should already be an ROI)
-        # self.counts[self.im_num] = np.sum(self.im_vals)
         # take the max count in the image (undermines the statistics of the background)
         self.counts[self.im_num] = np.max(self.im_vals)
         
@@ -335,14 +374,17 @@ class image_handler:
         """Load back in the counts data from a stored csv file, leavning space
         in the arrays to add new data as well"""
         data = np.genfromtxt(file_name, delimiter=',', dtype=str)
+        fd = data[1:,1:].astype(float) # the numerical data
+
         # the first row is the header
-        self.files = np.concatenate(data[1:,0], np.array([None]*self.n))
-        self.counts = np.concatenate(data[1:,1], np.zeros(self.n))
-        self.atom = np.concatenate(data[1:,2], np.zeros(self.n))
-        self.xc_list = np.concatenate(data[1:,3], np.zeros(self.n))
-        self.yc_list = np.concatenate(data[1:,4], np.zeros(self.n))
-        self.mean_count = np.concatenate(data[1:,5], np.zeros(self.n)) 
-        self.std_count = np.concatenate(data[1:,6], np.zeros(self.n))
+        self.files = np.concatenate((self.files[:self.im_num], data[1:,0], np.array([None]*self.n)))
+        self.counts = np.concatenate((self.counts[:self.im_num], fd[:,0], np.zeros(self.n)))
+        self.atom = np.concatenate((self.atom[:self.im_num], fd[:,1], np.zeros(self.n)))
+        self.xc_list = np.concatenate((self.xc_list[:self.im_num], fd[:,2], np.zeros(self.n)))
+        self.yc_list = np.concatenate((self.yc_list[:self.im_num], fd[:,3], np.zeros(self.n)))
+        self.mean_count = np.concatenate((self.mean_count[:self.im_num], fd[:,4], np.zeros(self.n)))
+        self.std_count = np.concatenate((self.std_count[:self.im_num], fd[:,5], np.zeros(self.n)))
+        self.im_num += np.size(data[1:,0]) # now we have filled this many extra columns.
 
         
     def save_state(self, save_file_name):
@@ -388,11 +430,36 @@ class main_window(QMainWindow):
         grid = QGridLayout()
         self.centre_widget.setLayout(grid)
 
+        # make sure user input is float:
+        double_validator = QDoubleValidator()
+
+        # menubar allows you to save/load data
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu('File')
+        
+        save_hist = QAction('Save histogram', self) # save current hist to csv
+        save_hist.triggered.connect(self.save_hist_data)
+        
+        load_menu = QMenu('Load histogram data', self)  # drop down menu for loading hist
+        load_dir = QAction('From Files', self) # from image files
+        load_dir.triggered.connect(self.load_from_files)
+        load_menu.addAction(load_dir)
+        load_csv = QAction('From csv', self) # from csv of hist data
+        load_csv.triggered.connect(self.load_from_csv)
+        load_menu.addAction(load_csv)
+
+        load_im = QAction('Load Image', self) # display a loaded image
+        load_im.triggered.connect(self.load_image)
+        
+        file_menu.addAction(load_im)
+        file_menu.addAction(save_hist)
+        file_menu.addMenu(load_menu)
+
         # button to initiate dir watcher
-        dw_init_button = QPushButton('Initiate dir watcher', self)
-        dw_init_button.clicked.connect(self.reset_DW) # function to start dir watcher
-        dw_init_button.resize(dw_init_button.sizeHint())
-        grid.addWidget(dw_init_button, 7,0, 1,2)
+        self.dw_init_button = QPushButton('Initiate directory watcher', self)
+        self.dw_init_button.clicked.connect(self.reset_DW) # function to start dir watcher
+        self.dw_init_button.resize(self.dw_init_button.sizeHint())
+        grid.addWidget(self.dw_init_button, 7,0, 1,2)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
@@ -405,26 +472,7 @@ class main_window(QMainWindow):
         # main subplot of histogram
         self.hist_canvas = pg.PlotWidget()
         self.hist_canvas.setTitle("Histogram of CCD counts")
-        grid.addWidget(self.hist_canvas, 1,0, 5,7)  # plot spans 5 rows/columns
-        
-        # make sure user input is float:
-        double_validator = QDoubleValidator()
-        
-        
-#        # menubar allows you to load data
-#        menubar = self.menuBar()
-#        file_menu = menubar.addMenu('File')
-#        
-#        save_hist = QAction('Save histogram', self) # save current hist to csv
-#        
-#        load_menu = QMenu('Load Data', self)  # drop down menu for loading hist
-#        load_dir = QAction('From Directory', self) # from dir of images
-#        load_menu.addAction(load_dir)
-#        load_csv = QAction('From csv', self) # from csv of hist data
-#        load_menu.addAction(load_csv)
-#        
-#        file_menu.addAction(save_hist)
-#        file_menu.addMenu(load_menu)
+        grid.addWidget(self.hist_canvas, 1,0, 5,8)  # plot spans 5 rows/columns
         
         # adjustable parameters: min/max counts, number of bins
         # min counts:
@@ -476,24 +524,24 @@ class main_window(QMainWindow):
         
         im_grid_pos = 8 # x grid position. leave enought space for the histogram
         # centre of ROI x position
-        xc_label = QLabel('ROI x_c: ', self)
-        grid.addWidget(xc_label, 7,im_grid_pos, 1,1)
+        self.xc_label = QLabel('ROI x_c: ', self)
+        grid.addWidget(self.xc_label, 7,im_grid_pos, 1,1)
         self.roi_x_edit = QLineEdit(self)
         grid.addWidget(self.roi_x_edit, 7,im_grid_pos+1, 1,1)
         self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
         self.roi_x_edit.setValidator(double_validator)
          
         # centre of ROI y position
-        yc_label = QLabel('ROI y_c: ', self)
-        grid.addWidget(yc_label, 7,im_grid_pos+2, 1,1)
+        self.yc_label = QLabel('ROI y_c: ', self)
+        grid.addWidget(self.yc_label, 7,im_grid_pos+2, 1,1)
         self.roi_y_edit = QLineEdit(self)
         grid.addWidget(self.roi_y_edit, 7,im_grid_pos+3, 1,1)
         self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
         self.roi_y_edit.setValidator(double_validator)
         
         # ROI size
-        l_label = QLabel('ROI size: ', self)
-        grid.addWidget(l_label, 7,im_grid_pos+4, 1,1)
+        self.l_label = QLabel('ROI size: ', self)
+        grid.addWidget(self.l_label, 7,im_grid_pos+4, 1,1)
         self.roi_l_edit = QLineEdit(self)
         grid.addWidget(self.roi_l_edit, 7,im_grid_pos+5, 1,1)
         self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
@@ -502,16 +550,14 @@ class main_window(QMainWindow):
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
         grid.addWidget(self.im_canvas, 1,im_grid_pos, 5,8)
-        self.roi = pg.ROI((0,0), (10,10)) # 
-        self.roi.addTranslateHandle(10)  # allows the user to drag the ROI
-        self.roi.addScaleHandle((0,0), (0,0)) # user can resize the ROI
+        self.roi = self.im_canvas.roi # get the ROI from the ROI plot
         self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
-        self.im_canvas.addItem(self.roi)
         self.im_canvas.show()
 
         # choose main window position and dimensions: (xpos,ypos,width,height)
         self.setGeometry(100, 100, 1200, 700)
         self.setWindowTitle('Single Atom Image Analyser')
+        self.setWindowIcon(QIcon('tempicon.png'))
         
     #### #### initiation functions #### #### 
 
@@ -528,23 +574,27 @@ class main_window(QMainWindow):
             self.reset_DW()
             
     def reset_DW(self):
-        """Initiate the dir watcher (restarts a new instance if there is already
-        one running, since it crashes if there is an exception."""
+        """Initiate the dir watcher. If there is already one running, stop the 
+        thread and delete the instance to ensure it doesn't run in the 
+        background (which might overwrite files)."""
         if self.dir_watcher: # check if there is a current thread
-            self.dir_watcher.observer.stop()
-            del self.dir_watcher    # ensure that the old thread stops
+            self.dir_watcher.observer.stop() # ensure that the old thread stops
+            self.dir_watcher = None
             self.dw_status_label.setText("Stopped")
-            
-        self.dir_watcher = dir_watcher()
-        self.dir_watcher.event_handler.event_path.connect(self.update_plot)
-        self.dw_status_label.setText("Running")
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setText("Directory Watcher initiated with settings:\n"+
-            "date\t\t\t--"+self.dir_watcher.date+"\n"+
-            self.dir_watcher.print_dirs(*self.dir_watcher.dirs_list))
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec_()
+            self.dw_init_button.setText('Initiate directory watcher')
+
+        else: 
+            self.dir_watcher = dir_watcher()
+            self.dir_watcher.event_handler.event_path.connect(self.update_plot)
+            self.dw_status_label.setText("Running")
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("Directory Watcher initiated with settings:\n"+
+                "date\t\t\t--"+self.dir_watcher.date+"\n"+
+                self.dir_watcher.print_dirs(*self.dir_watcher.dirs_list))
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+            self.dw_init_button.setText('Stop directory watcher')
                 
     #### #### user input functions #### #### 
     
@@ -553,11 +603,12 @@ class main_window(QMainWindow):
         x0, y0 = self.roi.pos()  # lower left corner of bounding rectangle
         xw, yw = self.roi.size() # widths
         l = int(0.5*(xw+yw))  # want a square ROI
-        xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
+        # note: setting the origing as bottom left but the image has origin top left
+        xc, yc = int(x0 + l//2), self.image_handler.pic_size - int(y0 + l//2)  # centre
         self.image_handler.set_roi(dimensions=[xc, yc, l])
-        # self.roi_x_edit.setText(str(xc)) # currently causes infinite loop
-        # self.roi_y_edit.setText(str(yc))
-        # self.roi_l_edit.setText(str(l))
+        self.xc_label.setText('ROI x_c = '+str(xc)) 
+        self.yc_label.setText('ROI y_c = '+str(yc))
+        self.l_label.setText('ROI size = '+str(l))
             
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
@@ -577,12 +628,16 @@ class main_window(QMainWindow):
         
         if xc - l//2 < 0 or yc - l//2 < 0:
             l = 2*min([xc, yc])  # can't have the boundary go off the edge
+        if int(l) == 0:
+            l = -1 # can't have zero width
         
         self.image_handler.set_roi(dimensions=list(map(int, [xc, yc, l])))
-        print("ROI: ", [self.image_handler.xc, self.image_handler.yc, self.image_handler.roi_size])
-        
+        self.xc_label.setText('ROI x_c = '+str(xc)) 
+        self.yc_label.setText('ROI y_c = '+str(yc))
+        self.l_label.setText('ROI size = '+str(l))
         # update ROI on image canvas
-        self.roi.setPos(xc - l//2, yc - l//2)
+        # note: setting the origing as bottom left but the image has origin top left
+        self.roi.setPos(xc - l//2, self.image_handler.pic_size - yc - l//2)
         self.roi.setSize(l, l)
         
         
@@ -597,6 +652,8 @@ class main_window(QMainWindow):
             if new_vals[0] == '' and self.image_handler.im_num > 0:
                 new_vals[0] = min(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[1] == '' and self.image_handler.im_num > 0:
+                new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
+            elif int(new_vals[1]) < int(new_vals[0]):
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[2] == '' and self.image_handler.im_num > 0:
                 new_vals[2] = 20 + self.image_handler.im_num // 20
@@ -651,8 +708,9 @@ class main_window(QMainWindow):
             except Exception: pass # if it's already been disconnected 
             
             # just process the image and set the text of the most recent file
-            self.dir_watcher.event_handler.event_path.connect(self.image_handler.process)
-            self.dir_watcher.event_handler.event_path.connect(self.recent_label.setText) # might need a better label
+            if self.dir_watcher: # check that the dir watcher exists to prevent crash
+                self.dir_watcher.event_handler.event_path.connect(self.image_handler.process)
+                self.dir_watcher.event_handler.event_path.connect(self.recent_label.setText) # might need a better label
             
     #### #### canvas functions #### #### 
         
@@ -688,7 +746,75 @@ class main_window(QMainWindow):
         
         self.plot_current_hist()
         self.plot_time = time.time() - t2
+
+#### #### save and load data functions #### ####
+
+    def save_hist_data(self, trigger=None):
+        """Prompt the user to give a directory to save the histogram data, then save"""
+        try:
+            save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File')
+            self.image_handler.save_state(save_file_name)
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("File saved to "+save_file_name)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+
+        except OSError:
+            pass # user cancelled - file not found
+
+    def check_reset(self):
+        """Ask the user if they would like to reset the current data stored"""
+        reply = QMessageBox.question(self, 'Confirm Data Replacement',
+            "Do you want to discard the current data before loading new data?", 
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
         
+        if reply == QMessageBox.Cancel:
+            return 0
+
+        elif reply == QMessageBox.Yes:
+            self.image_handler.reset_arrays() # gets rid of old data
+
+        return 1
+
+    def load_from_files(self, trigger=None):
+        """Prompt the user to select image files to process, then sequentially process
+        them and update the histogram"""
+        if self.check_reset():
+            try:
+                self.recent_label.setText('Processing files...') # comes first otherwise not executed
+                file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files')
+                for file_name in file_list:
+                    self.image_handler.process(file_name)
+                    self.recent_label.setText('Just processed: '+os.path.basename(file_name))
+            
+                self.plot_current_hist()
+
+            except OSError:
+                pass # user cancelled - file not found
+
+    def load_from_csv(self, trigger=None):
+        """Prompt the user to select a csv file to load histogram data from.
+        It must have the specific layout that the image_handler saves in."""
+        if self.check_reset():
+            try:
+                file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
+                self.image_handler.load_from_csv(file_list[0])
+                self.plot_current_hist()
+
+            except OSError:
+                pass # user cancelled - file not found
+
+    def load_image(self, trigger=None):
+        """Prompt the user to select an image file to display"""
+        try:
+            file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
+            self.update_im(file_list[0])
+
+        except OSError:
+            pass # user cancelled - file not found
+
     #### #### testing functions #### #### 
         
     def print_times(self, unit="s"):
@@ -717,15 +843,7 @@ class main_window(QMainWindow):
 
         if reply == QMessageBox.Yes:
             # save current state:
-            saved_file_list = os.listdir(self.dir_watcher.image_storage_path)
-            measure = 0  # write a new file with an index one greater than the previous measure file
-            for file_name in saved_file_list:
-                if "measure" in file_name:
-                    file_num = int(file_name.split('.')[0][-1])
-                    if file_num > measure:
-                        measure = file_num
-            self.image_handler.save_state(os.path.join(self.dir_watcher.image_storage_path,
-                            'measure'+str(measure)+'.csv'))
+            self.save_hist_data()
                             
             event.accept()
         
@@ -739,7 +857,7 @@ class main_window(QMainWindow):
             
 if __name__ == "__main__":
     # if running in IPython then creating an app instance isn't necessary...
-    app = QApplication(sys.argv)  
+    app = QApplication(sys.argv)
     main_win = main_window()
     main_win.show()
     sys.exit(app.exec_())
