@@ -290,7 +290,7 @@ class image_handler:
         else:
             # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
             # might fail if trying to go really fast because the file hasn't been filled with data yet
-           if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
+            if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
                 self.im_vals = self.load_full_im(im_name)
             else:
                 print("File was empty, waiting 0.01s and trying again")
