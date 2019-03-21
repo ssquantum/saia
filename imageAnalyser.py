@@ -26,7 +26,7 @@ import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
         QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
-        QDoubleValidator, QComboBox, QMenu) 
+        QDoubleValidator, QComboBox, QMenu, QActionGroup) 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -87,7 +87,7 @@ class system_event_handler(FileSystemEventHandler, QThread):
             # print(event.event_type)
             # print(event.src_path)
             # print("This function appears to run twice somteimes....")
-            # get Dexter file number       ------------ but could we just sync at the start and then increment with every new file?
+            # get Dexter file number  
             with open(self.dexter_sync_file_name, 'r') as sync_file:
                 self.dfn = str(int(sync_file.read()))
             
@@ -216,6 +216,7 @@ class image_handler:
         """Set the pic size by looking at the number of columns in a file"""
         im_vals = np.genfromtxt(im_name, delimiter=self.delim)
         self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row number
+        return self.pic_size
 
     def reset_arrays(self):
         """Reset all of the histogram array data to zero"""
@@ -231,10 +232,10 @@ class image_handler:
         
     def load_full_im(self, im_name):
         """return an array with the values of the image"""
-        #np.array(Image.open(im_name)) # for bmp images
+        # np.array(Image.open(im_name)) # for bmp images
         # return np.genfromtxt(im_name, delimiter=self.delim)#[:,1:] # first column gives column number
         return np.loadtxt(im_name, delimiter=self.delim,
-                              usecols=range(1,self.pic_size-1))
+                              usecols=range(1,self.pic_size))
         
     def process(self, im_name):
         """Get the data from an image """
@@ -290,9 +291,10 @@ class image_handler:
         else:
             # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
             # might fail if trying to go really fast because the file hasn't been filled with data yet
-            if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
+            # if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
+            try:
                 self.im_vals = self.load_full_im(im_name)
-            else:
+            except IndexError:
                 print("File was empty, waiting 0.01s and trying again")
                 time.sleep(0.01)
                 self.im_vals = self.load_full_im(im_name)
@@ -320,15 +322,13 @@ class image_handler:
         # probability 6e-7 of being outside of 5 sigma
         # threshold_estimate = np.mean(im_vals) + 5*np.std(im_vals, ddof=1)
             
-    def histogram(self):
-        """Plot a histogram of the photon counts, determine a threshold for 
-        single atom presence.
-        """
+    def hist_and_thresh(self):
+        """Make a histogram of the photon counts and determine a threshold for 
+        single atom presence."""
         if np.size(self.bin_array) > 0: 
             occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
         else:
             occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
-            # could also have bins=20+self.im_num//10) # The number of bins increases with the number of image files processed.
         
         # determine a threshold separating the background peak from the single atom peak
         # there might also be peaks from more than one atom, or they might be overlapping...
@@ -342,8 +342,16 @@ class image_handler:
         except ValueError:
             peak2, ind2, x2, sd2, edge2 = est_param(bins[:2 * ind1 - edge1 - 1], occ[:2 * ind1 - edge1])
 
-        self.thresh = 0.5*(x1 + x2)  # between the two peaks
+        self.thresh = 0.5*(x1 + x2)  # midpoint between the two peaks
         
+        return bins, occ, self.thresh
+
+    def histogram(self):
+        """Make a histogram of the photon counts but don't update the threshold"""
+        if np.size(self.bin_array) > 0: 
+            occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
+        else:
+            occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
         return bins, occ, self.thresh
         
     def set_roi(self, im_name='', dimensions=[]):
@@ -389,7 +397,7 @@ class image_handler:
         
     def save_state(self, save_file_name):
         """Save the processed data to csv"""
-        self.histogram() # update the threshold estimate
+        self.hist_and_thresh() # update the threshold estimate
          
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
@@ -433,8 +441,9 @@ class main_window(QMainWindow):
         # make sure user input is float:
         double_validator = QDoubleValidator()
 
-        # menubar allows you to save/load data
+        # menubar at top keeps things tidy
         menubar = self.menuBar()
+        # file menubar allows you to save/load data
         file_menu = menubar.addMenu('File')
         
         save_hist = QAction('Save histogram', self) # save current hist to csv
@@ -455,6 +464,21 @@ class main_window(QMainWindow):
         file_menu.addAction(save_hist)
         file_menu.addMenu(load_menu)
 
+        hist_menu =  menubar.addMenu('Histogram')
+
+        bin_menu = QMenu('Binning', self) # drop down menu for binning options
+        bin_options = QActionGroup(bin_menu)  # group together the options
+        self.bin_actions = []
+        for action_label in ['Automatic', 'Manual', 'No Update']:
+            self.bin_actions.append(QAction(action_label, bin_menu, checkable=True, 
+                            checked=action_label=='Automatic')) # default is auto
+            bin_menu.addAction(self.bin_actions[-1])
+            bin_options.addAction(self.bin_actions[-1])
+        bin_options.setExclusive(True) # only one option checked at a time
+        bin_options.triggered.connect(self.set_bins) # connect the signal
+        hist_menu.addMenu(bin_menu)
+            
+
         # button to initiate dir watcher
         self.dw_init_button = QPushButton('Initiate directory watcher', self)
         self.dw_init_button.clicked.connect(self.reset_DW) # function to start dir watcher
@@ -472,7 +496,7 @@ class main_window(QMainWindow):
         # main subplot of histogram
         self.hist_canvas = pg.PlotWidget()
         self.hist_canvas.setTitle("Histogram of CCD counts")
-        grid.addWidget(self.hist_canvas, 1,0, 5,8)  # plot spans 5 rows/columns
+        grid.addWidget(self.hist_canvas, 1,0, 6,8)  # plot spans 5 rows/columns
         
         # adjustable parameters: min/max counts, number of bins
         # min counts:
@@ -498,14 +522,17 @@ class main_window(QMainWindow):
         grid.addWidget(self.num_bins_edit, 0,5, 1,1)
         self.num_bins_edit.textChanged[str].connect(self.bins_text_edit)
         self.num_bins_edit.setValidator(double_validator)
-        
-        # user chooses whether to use automatic or manual binning (default automatic)
-        self.bins_toggle = QComboBox(self)
-        self.bins_toggle.addItem('Auto Binning')
-        self.bins_toggle.addItem('Manual Binning')
-        self.bins_toggle.addItem('No Update')
-        self.bins_toggle.activated[str].connect(self.set_bins)
-        grid.addWidget(self.bins_toggle, 0,6, 1,1)
+
+        # user can set the threshold
+        self.thresh_toggle = QPushButton('User Threshold: ', self)
+        self.thresh_toggle.setCheckable(True)
+        self.thresh_toggle.clicked[bool].connect(self.set_thresh)
+        grid.addWidget(self.thresh_toggle, 0,6, 1,1)
+        # user inputs threshold
+        self.thresh_edit = QLineEdit(self)
+        grid.addWidget(self.thresh_edit, 0,7, 1,1)
+        self.thresh_edit.textChanged[str].connect(self.bins_text_edit)
+        self.thresh_edit.setValidator(double_validator)
         
         # get user to set the image size in pixels
         size_label = QLabel('Image Size in Pixels: ', self)
@@ -549,7 +576,7 @@ class main_window(QMainWindow):
         
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
-        grid.addWidget(self.im_canvas, 1,im_grid_pos, 5,8)
+        grid.addWidget(self.im_canvas, 1,im_grid_pos, 6,8)
         self.roi = self.im_canvas.roi # get the ROI from the ROI plot
         self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
         self.im_canvas.show()
@@ -595,6 +622,7 @@ class main_window(QMainWindow):
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             self.dw_init_button.setText('Stop directory watcher')
+            self.setWindowTitle('Single Atom Image Analyser --- ' + self.dir_watcher.date)
                 
     #### #### user input functions #### #### 
     
@@ -644,7 +672,7 @@ class main_window(QMainWindow):
     def bins_text_edit(self, text):
         """Update the histogram bins every time a text edit is made by the user
         to one of the line edit widgets"""
-        if str(self.bins_toggle.currentText()) == 'Manual Binning':
+        if self.bin_actions[1].isChecked(): # [auto, manual, no update]
             new_vals = [self.min_counts_edit.text(),
                             self.max_counts_edit.text(), self.num_bins_edit.text()]
                             
@@ -653,7 +681,7 @@ class main_window(QMainWindow):
                 new_vals[0] = min(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[1] == '' and self.image_handler.im_num > 0:
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
-            elif int(new_vals[1]) < int(new_vals[0]):
+            elif not any([v == '' for v in new_vals[:2]]) and int(new_vals[1]) < int(new_vals[0]):
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[2] == '' and self.image_handler.im_num > 0:
                 new_vals[2] = 20 + self.image_handler.im_num // 20
@@ -663,48 +691,78 @@ class main_window(QMainWindow):
             
             # set the new values for the bins of the image handler
             self.image_handler.bin_array = np.linspace(min_bin, max_bin, num_bins)
-            # update the plot
-            self.plot_current_hist()
+
+            # set the new threshold if supplied
+            if self.thresh_toggle.isChecked():
+                try:
+                    self.image_handler.thresh = float(self.thresh_edit.text())
+                except ValueError: pass # user switched toggle before inputing text
+                self.plot_current_hist(self.image_handler.histogram) # doesn't update thresh
+            else:
+                self.plot_current_hist(self.image_handler.hist_and_thresh) # updates thresh
+            
     
     #### #### toggle functions #### #### 
+
+    def set_thresh(self, toggle):
+        """If the toggle is true, the user supplies the threshold value and it is
+        kept constant using the image_handler.histogram() function. Otherwise,
+        update the threshold with image_handler.hist_and_thresh()"""
+        if toggle:
+            try: # disconnect all slots (including imshow...)
+                self.dir_watcher.event_handler.event_path.disconnect()
+            except Exception: pass # if already disconnected
+            if self.dir_watcher:
+                self.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
+        else:
+            try: # disconnect all slots (including imshow...)
+                self.dir_watcher.event_handler.event_path.disconnect()
+            except Exception: pass # if already disconnected
+            if self.dir_watcher:
+                self.dir_watcher.event_handler.event_path.connect(self.update_plot)
         
     def set_im_show(self, toggle):
-        """If the toggle is True, always update the widget with the last image"""
+        """If the toggle is True, always update the widget with the last image.
+        Note that disconnecting all slots means that this toggle might have to
+        be reset when other buttons are pressed."""
         if toggle:
             self.dir_watcher.event_handler.event_path.connect(self.update_im)
         else:
             try: 
                 self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
             except Exception: pass # if it's already been disconnected 
+
+    def swap_signals(self):
+        """Disconnect the image_handler process signal from the dir_watcher event
+        and (re)connect the update plot"""
+        try: # disconnect all slots
+            self.dir_watcher.event_handler.event_path.disconnect() 
+        except Exception: pass
+       
+        if self.dir_watcher and self.thresh_toggle.isChecked():
+            self.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
+        elif self.dir_watcher and not self.thresh_toggle.isChecked():
+            self.dir_watcher.event_handler.event_path.connect(self.update_plot)
     
-    def set_bins(self, toggle):
-        """If the toggle is Auto Binning, use automatic histogram binning.
-        If the toggle is Manual binning, read in values from the line edit 
+    def set_bins(self, action):
+        """Check which of the bin action menu bar options is checked.
+        If the toggle is Automatic, use automatic histogram binning.
+        If the toggle is Manual, read in values from the line edit 
         widgets.
         If the toggle is No Update, disconnect the dir watcher new event signal
         from the plot update."""
-        if toggle == 'Manual Binning':
-            # disconnect the other signals if they've been set:
-            try:
-                self.dir_watcher.event_handler.event_path.disconnect(self.image_handler.process)
-            except Exception: pass
-            try:
-                self.dir_watcher.event_handler.event_path.disconnect(self.recent_label.setText)
-            except Exception: pass
+        if self.bin_actions[1].isChecked(): # manual
+            self.swap_signals()  # disconnect image handler, reconnect plot
             self.bins_text_edit('reset')            
-        elif toggle == 'Auto Binning':
-            # disconnect the other signals if they've been set:
-            try:
-                self.dir_watcher.event_handler.event_path.disconnect(self.image_handler.process)
-            except Exception: pass
-            try:
-                self.dir_watcher.event_handler.event_path.disconnect(self.recent_label.setText)
-            except Exception: pass
+
+        elif self.bin_actions[0].isChecked(): # automatic
+            self.swap_signals()  # disconnect image handler, reconnect plot
             self.image_handler.bin_array = []
-            self.plot_current_hist()
-        elif toggle == 'No Update':
-            try: 
-                self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
+            self.plot_current_hist(self.image_handler.histogram)
+
+        elif self.bin_actions[2].isChecked(): # no update
+            try: # disconnect all slots
+                self.dir_watcher.event_handler.event_path.disconnect()
             except Exception: pass # if it's already been disconnected 
             
             # just process the image and set the text of the most recent file
@@ -714,15 +772,18 @@ class main_window(QMainWindow):
             
     #### #### canvas functions #### #### 
         
-    def plot_current_hist(self):
-        """Reset the plot to show the current data stored in the image handler"""
+    def plot_current_hist(self, hist_function):
+        """Reset the plot to show the current data stored in the image handler.
+        hist_function is used to make the histogram and allows the toggling of
+        different functions that may or may not update the threshold value."""
         # update the histogram and threshold estimate
-        bins, occ, thresh = self.image_handler.histogram()
+        bins, occ, thresh = hist_function()
         
         self.hist_canvas.clear()
         self.hist_canvas.plot(bins, occ, stepMode=True,
                                 fillLevel=0, brush = (250,250,250,250)) # histogram
         self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen=1) # threshold line
+        self.print_times()
         
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -742,9 +803,25 @@ class main_window(QMainWindow):
         self.int_time = t2 - t1
         
         # display the name of the most recent file
-        self.recent_label.setText('Just processed: '+os.path.basename(event_path) )
+        self.recent_label.setText('Just processed: '+os.path.basename(event_path))
         
-        self.plot_current_hist()
+        self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
+        self.plot_time = time.time() - t2
+
+    def update_plot_only(self, event_path):
+        """Receive the event path emitted from the system event handler signal
+        process the file in the event path with the image handler and update
+        the figure but without changing the threshold value"""
+        # add the count
+        t1 = time.time()
+        self.image_handler.process(event_path)
+        t2 = time.time()
+        self.int_time = t2 - t1
+        
+        # display the name of the most recent file
+        self.recent_label.setText('Just processed: '+os.path.basename(event_path))
+        
+        self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
         self.plot_time = time.time() - t2
 
 #### #### save and load data functions #### ####
@@ -789,7 +866,7 @@ class main_window(QMainWindow):
                     self.image_handler.process(file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name))
             
-                self.plot_current_hist()
+                self.plot_current_hist(self.image_handler.histogram)
 
             except OSError:
                 pass # user cancelled - file not found
@@ -801,7 +878,7 @@ class main_window(QMainWindow):
             try:
                 file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
                 self.image_handler.load_from_csv(file_list[0])
-                self.plot_current_hist()
+                self.plot_current_hist(self.image_handler.histogram)
 
             except OSError:
                 pass # user cancelled - file not found
