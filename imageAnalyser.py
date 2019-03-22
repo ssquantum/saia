@@ -23,10 +23,17 @@ import shutil
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
 import time
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
-        QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
-        QDoubleValidator, QComboBox, QMenu, QActionGroup) 
+# some python packages use PyQt4, some use PyQt5...
+try:
+    from PyQt4.QtCore import QThread, pyqtSignal
+    from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
+            QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
+            QDoubleValidator, QComboBox, QMenu, QActionGroup) 
+except ModuleNotFoundError:
+    from PyQt5.QtCore import QThread, pyqtSignal
+    from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
+            QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
+            QDoubleValidator, QComboBox, QMenu, QActionGroup) 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -709,7 +716,7 @@ class main_window(QMainWindow):
         kept constant using the image_handler.histogram() function. Otherwise,
         update the threshold with image_handler.hist_and_thresh()"""
         if toggle:
-            try: # disconnect all slots (including imshow...)
+            try: # disconnect all slots because it might be connected several times
                 self.dir_watcher.event_handler.event_path.disconnect()
             except Exception: pass # if already disconnected
             if self.dir_watcher:
@@ -728,7 +735,7 @@ class main_window(QMainWindow):
         if toggle:
             self.dir_watcher.event_handler.event_path.connect(self.update_im)
         else:
-            try: 
+            try: # note: it could have been connected several times... need while True: ... break
                 self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
             except Exception: pass # if it's already been disconnected 
 
@@ -783,7 +790,6 @@ class main_window(QMainWindow):
         self.hist_canvas.plot(bins, occ, stepMode=True,
                                 fillLevel=0, brush = (250,250,250,250)) # histogram
         self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen=1) # threshold line
-        self.print_times()
         
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -933,8 +939,13 @@ class main_window(QMainWindow):
 ####    ####    ####    #### 
             
 if __name__ == "__main__":
-    # if running in IPython then creating an app instance isn't necessary...
-    app = QApplication(sys.argv)
+    # if running in Pylab/IPython then there may already be an app instance
+    app = QApplication.instance()
+    standalone = app is None # false if there is already an app instance
+    if standalone: # if there isn't an instance, make one
+        app = QApplication(sys.argv) 
+        
     main_win = main_window()
     main_win.show()
-    sys.exit(app.exec_())
+    if standalone: # if an app instance was made, execute it
+        sys.exit(app.exec_()) # when the window is closed, the python code also stops
