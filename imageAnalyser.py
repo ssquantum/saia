@@ -873,12 +873,17 @@ class main_window(QMainWindow):
         if self.check_reset():
             try:
                 self.recent_label.setText('Processing files...') # comes first otherwise not executed
-                file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files')
+                if 'PyQt4' in sys.modules:
+                    file_list = QFileDialog.getOpenFileNames(self, 'Select Files')
+                elif 'PyQt5' in sys.modules:
+                    file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files')
                 for file_name in file_list:
                     self.image_handler.process(file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name))
             
                 self.plot_current_hist(self.image_handler.histogram)
+                if self.recent_label.text == 'Processing files...':
+                    self.recent_label.setText('Finished Processing')
 
             except OSError:
                 pass # user cancelled - file not found
@@ -888,8 +893,12 @@ class main_window(QMainWindow):
         It must have the specific layout that the image_handler saves in."""
         if self.check_reset():
             try:
-                file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
-                self.image_handler.load_from_csv(file_list[0])
+                # the implementation of QFileDialog changed...
+                if 'PyQt4' in sys.modules: 
+                    file_name = QFileDialog.getOpenFileName(self, 'Select A File')
+                elif 'PyQt5' in sys.modules:
+                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File')
+                self.image_handler.load_from_csv(file_name)
                 self.plot_current_hist(self.image_handler.histogram)
 
             except OSError:
@@ -898,9 +907,12 @@ class main_window(QMainWindow):
     def load_image(self, trigger=None):
         """Prompt the user to select an image file to display"""
         try:
-            file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
-            if np.size(file_list) > 0: # avoid crash if the user cancelled
-                self.update_im(file_list[0])
+            if 'PyQt4' in sys.modules:
+                file_name = QFileDialog.getOpenFileName(self, 'Select A File')
+            elif 'PyQt5' in sys.modules:
+                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File')
+            if file_name:  # avoid crash if the user cancelled
+                self.update_im(file_name)
 
         except OSError:
             pass # user cancelled - file not found
