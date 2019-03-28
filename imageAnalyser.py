@@ -210,7 +210,7 @@ class image_handler:
         self.xc = 0                     # ROI centre x position 
         self.yc = 0                     # ROI centre y position
         self.roi_size = -1              # ROI length in pixels. default -1 takes the whole image
-        self.pic_size = 64              # number of pixels in an image
+        self.pic_size = 512             # number of pixels in an image
         self.thresh = 1                 # initial threshold for atom detection
         self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
         # file label list length < integrated counts so that no data is lost when extra spaces have to be appended
@@ -661,7 +661,9 @@ class main_window(QMainWindow):
         else:
             xc, yc, l = list(map(int, [xc, yc, l]))
         
-        if xc - l//2 < 0 or yc - l//2 < 0:
+        if (xc - l//2 < 0 or yc - l//2 < 0 
+            or xc + l//2 > self.image_handler.pic_size 
+            or yc + l//2 > self.image_handler.pic_size):
             l = 2*min([xc, yc])  # can't have the boundary go off the edge
         if int(l) == 0:
             l = -1 # can't have zero width
@@ -689,11 +691,15 @@ class main_window(QMainWindow):
             if new_vals[1] == '' and self.image_handler.im_num > 0:
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             elif not any([v == '' for v in new_vals[:2]]) and int(new_vals[1]) < int(new_vals[0]):
+                # can't have max < min
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             if new_vals[2] == '' and self.image_handler.im_num > 0:
                 new_vals[2] = 20 + self.image_handler.im_num // 20
             if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
                 new_vals = [0, 1, 10]
+            if int(new_vals[2]) < 1:
+                # 0 bins causes value error
+                new_vals[2] = 10
             min_bin, max_bin, num_bins = list(map(int, new_vals))
             
             # set the new values for the bins of the image handler
