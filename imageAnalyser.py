@@ -899,7 +899,8 @@ class main_window(QMainWindow):
         """Prompt the user to select an image file to display"""
         try:
             file_list, _ = QFileDialog.getOpenFileNames(self, 'Select A File')
-            self.update_im(file_list[0])
+            if np.size(file_list) > 0: # avoid crash if the user cancelled
+                self.update_im(file_list[0])
 
         except OSError:
             pass # user cancelled - file not found
