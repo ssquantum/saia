@@ -85,35 +85,56 @@ class system_event_handler(FileSystemEventHandler, QThread):
         self.end_t = time.time()   # time at end of event
         self.idle_t = 0            # time between events
     
-    def on_any_event(self, event):
+    def on_created(self, event):
         """On a new image being written, save the file with a synced label into the 
         image storage dir"""
         t0 = time.time()
         self.idle_t = self.end_t - t0   # duration between end of last event and start of current event
-        if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
-            # print(event.event_type)
-            # print(event.src_path)
-            # print("This function appears to run twice somteimes....")
-            # get Dexter file number  
-            with open(self.dexter_sync_file_name, 'r') as sync_file:
+        # if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
+        print("--- --- --- ---")
+        print(event.event_type)
+        print(event.src_path)
+        with open(event.src_path, 'r') as f:
+            print("File len: ", np.size(f.read()))
+        
+        time.sleep(0.5)
+        # get Dexter file number  
+        with open(self.dexter_sync_file_name, 'r') as sync_file:
                 self.dfn = str(int(sync_file.read()))
-            
-            # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
-            new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
-            try:
-                shutil.copyfile(event.src_path, new_file_name)
-            except PermissionError:
-                print("WARNING: added a pause because python tried to access the file before the other program had let go")
-                time.sleep(0.01)
-                shutil.copyfile(event.src_path, new_file_name)
-            
-            # os.remove(event.src_path)  # delete the old file so that we can see a new created file event
-            
-            self.last_event_path = new_file_name  # update last event path
-            self.event_path.emit(new_file_name)  # emit signal
-            
-            self.end_t = time.time()       # time at end of current event
-            self.event_t = self.end_t - t0 # duration of event
+       
+        
+        # try:
+        #     with open(self.dexter_sync_file_name, 'r') as sync_file:
+        #         self.dfn = str(int(sync_file.read()))
+        # except ValueError: # sometimes tries to access the Dexter sync file before it's written
+        #     print("WARNING: added a pause because python tried to access the file before the other program had let go")
+        #     time.sleep(0.01)
+        #     with open(self.dexter_sync_file_name, 'r') as sync_file:
+        #         self.dfn = str(int(sync_file.read()))
+                
+        # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
+        new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
+        try:
+            shutil.copyfile(event.src_path, new_file_name)
+        except PermissionError:
+            print("WARNING: added a pause because python tried to access the file before the other program had let go")
+            time.sleep(0.2)
+            shutil.copyfile(event.src_path, new_file_name)
+        time.sleep(0.1)
+        
+        try:
+            os.remove(event.src_path)  # delete the old file so that we can see a new created file event
+        except PermissionError:
+            print("WARNING: added a pause because python tried to access the file before the other program had let go")
+            time.sleep(0.2)
+            os.remove(event.src_path)
+        
+        time.sleep(0.5)
+        self.last_event_path = new_file_name  # update last event path
+        self.event_path.emit(new_file_name)  # emit signal
+        
+        self.end_t = time.time()       # time at end of current event
+        self.event_t = self.end_t - t0 # duration of event
         
 ####    ####    ####    ####        
     
@@ -260,6 +281,7 @@ class image_handler:
                 self.atom = np.append(self.atom, np.zeros(self.n))
                 self.files = np.append(self.files, np.array([None]*self.n))
             self.add_count(im_name)
+        print("count added from: ", im_name)
 
     def add_int_count(self, im_name):
         """Fill in the next index of the counts by summing over the ROI region and then 
@@ -638,8 +660,8 @@ class main_window(QMainWindow):
         x0, y0 = self.roi.pos()  # lower left corner of bounding rectangle
         xw, yw = self.roi.size() # widths
         l = int(0.5*(xw+yw))  # want a square ROI
-        # note: setting the origing as bottom left but the image has origin top left
-        xc, yc = int(x0 + l//2), self.image_handler.pic_size - int(y0 + l//2)  # centre
+        # note: setting the origin as bottom left but the image has origin top left
+        xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
         self.image_handler.set_roi(dimensions=[xc, yc, l])
         self.xc_label.setText('ROI x_c = '+str(xc)) 
         self.yc_label.setText('ROI y_c = '+str(yc))
@@ -674,7 +696,7 @@ class main_window(QMainWindow):
         self.l_label.setText('ROI size = '+str(l))
         # update ROI on image canvas
         # note: setting the origing as bottom left but the image has origin top left
-        self.roi.setPos(xc - l//2, self.image_handler.pic_size - yc - l//2)
+        self.roi.setPos(xc - l//2, yc - l//2)
         self.roi.setSize(l, l)
         
         
@@ -841,7 +863,11 @@ class main_window(QMainWindow):
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""
         try:
-            save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File')
+            if 'PyQt4' in sys.modules:
+                save_file_name = QFileDialog.getSaveFileName(self, 'Save File')
+            elif 'PyQt5' in sys.modules:
+                save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File')
+            
             self.image_handler.save_state(save_file_name)
 
             msg = QMessageBox()
@@ -944,12 +970,17 @@ class main_window(QMainWindow):
             QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
 
         if reply == QMessageBox.Yes:
-            # save current state:
-            self.save_hist_data()
-                            
+            self.save_hist_data()         # save current state
+            
+            if self.dir_watcher:          # make sure that the directory watcher stops
+                self.dir_watcher.observer.stop()
+                
             event.accept()
         
         elif reply == QMessageBox.No:
+            if self.dir_watcher: # make sure that the directory watcher stops
+                self.dir_watcher.observer.stop()
+                
             event.accept()
             
         else:
