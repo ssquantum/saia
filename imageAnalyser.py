@@ -25,12 +25,12 @@ os.chdir(os.path.dirname(os.path.realpath(__file__)))
 import time
 # some python packages use PyQt4, some use PyQt5...
 try:
-    from PyQt4.QtCore import QThread, pyqtSignal
+    from PyQt4.QtCore import QThread, pyqtSignal, QEvent
     from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QComboBox, QMenu, QActionGroup) 
 except ModuleNotFoundError:
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from PyQt5.QtCore import QThread, pyqtSignal, QEvent
     from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QComboBox, QMenu, QActionGroup) 
@@ -85,35 +85,44 @@ class system_event_handler(FileSystemEventHandler, QThread):
         self.end_t = time.time()   # time at end of event
         self.idle_t = 0            # time between events
     
-    def on_any_event(self, event):
+    def on_created(self, event):
         """On a new image being written, save the file with a synced label into the 
         image storage dir"""
         t0 = time.time()
         self.idle_t = self.end_t - t0   # duration between end of last event and start of current event
-        if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
-            # print(event.event_type)
-            # print(event.src_path)
-            # print("This function appears to run twice somteimes....")
-            # get Dexter file number  
-            with open(self.dexter_sync_file_name, 'r') as sync_file:
+        # if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
+        # print("--- --- --- ---")
+        # print(event.event_type)
+        # print(event.src_path)
+        
+        time.sleep(0.3)
+        # get Dexter file number  
+        with open(self.dexter_sync_file_name, 'r') as sync_file:
                 self.dfn = str(int(sync_file.read()))
-            
-            # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
-            new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
-            try:
-                shutil.copyfile(event.src_path, new_file_name)
-            except PermissionError:
-                print("WARNING: added a pause because python tried to access the file before the other program had let go")
-                time.sleep(0.01)
-                shutil.copyfile(event.src_path, new_file_name)
-            
-            # os.remove(event.src_path)  # delete the old file so that we can see a new created file event
-            
-            self.last_event_path = new_file_name  # update last event path
-            self.event_path.emit(new_file_name)  # emit signal
-            
-            self.end_t = time.time()       # time at end of current event
-            self.event_t = self.end_t - t0 # duration of event
+                
+        # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
+        new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
+        try:
+            shutil.copyfile(event.src_path, new_file_name)
+        except PermissionError:
+            print("WARNING: added a pause because python tried to access the file before the other program had let go")
+            time.sleep(0.2)
+            shutil.copyfile(event.src_path, new_file_name)
+        time.sleep(0.1)  # add in latency in case it tries to delete the file before it's been saved.
+        
+        try:
+            os.remove(event.src_path)  # delete the old file so that we can see a new created file event
+        except PermissionError:
+            print("WARNING: added a pause because python tried to access the file before the other program had let go")
+            time.sleep(1)
+            os.remove(event.src_path)
+        
+        # time.sleep(0.5)
+        self.last_event_path = new_file_name  # update last event path
+        self.event_path.emit(new_file_name)  # emit signal
+        
+        self.end_t = time.time()       # time at end of current event
+        self.event_t = self.end_t - t0 # duration of event
         
 ####    ####    ####    ####        
     
@@ -303,7 +312,7 @@ class image_handler:
                 self.im_vals = self.load_full_im(im_name)
             except IndexError:
                 print("File was empty, waiting 0.01s and trying again")
-                time.sleep(0.01)
+                time.sleep(0.1)
                 self.im_vals = self.load_full_im(im_name)
         
         # take the max count in the image (undermines the statistics of the background)
@@ -432,6 +441,8 @@ class main_window(QMainWindow):
         super().__init__()
         self.dir_watcher = None  # a button will initiate the dir watcher
         self.image_handler = image_handler() # class to process images
+        pg.setConfigOption('background', 'w') # set graph background default white
+        pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.initUI()   # make the widgets
         self.init_DW()  # ask the user if they want to start the dir watcher
         self.t0 = time.time()  # time of initiation
@@ -452,9 +463,21 @@ class main_window(QMainWindow):
         menubar = self.menuBar()
         # file menubar allows you to save/load data
         file_menu = menubar.addMenu('File')
+        load_im = QAction('Load Image', self) # display a loaded image
+        load_im.triggered.connect(self.load_image)
         
+        file_menu.addAction(load_im)
+        
+        # histogram menu saves/loads/resets histogram and gives binning options
+        hist_menu =  menubar.addMenu('Histogram')
+
         save_hist = QAction('Save histogram', self) # save current hist to csv
         save_hist.triggered.connect(self.save_hist_data)
+        hist_menu.addAction(save_hist)
+
+        reset_hist = QAction('Reset histogram', self) # reset hist without loading new data
+        reset_hist.triggered.connect(self.load_empty_hist)
+        hist_menu.addAction(reset_hist)
         
         load_menu = QMenu('Load histogram data', self)  # drop down menu for loading hist
         load_dir = QAction('From Files', self) # from image files
@@ -463,15 +486,8 @@ class main_window(QMainWindow):
         load_csv = QAction('From csv', self) # from csv of hist data
         load_csv.triggered.connect(self.load_from_csv)
         load_menu.addAction(load_csv)
-
-        load_im = QAction('Load Image', self) # display a loaded image
-        load_im.triggered.connect(self.load_image)
         
-        file_menu.addAction(load_im)
-        file_menu.addAction(save_hist)
-        file_menu.addMenu(load_menu)
-
-        hist_menu =  menubar.addMenu('Histogram')
+        hist_menu.addMenu(load_menu)
 
         bin_menu = QMenu('Binning', self) # drop down menu for binning options
         bin_options = QActionGroup(bin_menu)  # group together the options
@@ -484,6 +500,7 @@ class main_window(QMainWindow):
         bin_options.setExclusive(True) # only one option checked at a time
         bin_options.triggered.connect(self.set_bins) # connect the signal
         hist_menu.addMenu(bin_menu)
+        
             
 
         # button to initiate dir watcher
@@ -583,6 +600,8 @@ class main_window(QMainWindow):
         
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
+        # self.im_canvas.ui.histogram.hide()
+        # self.im_canvas.ui.menuBtn.hide()
         grid.addWidget(self.im_canvas, 1,im_grid_pos, 6,8)
         self.roi = self.im_canvas.roi # get the ROI from the ROI plot
         self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
@@ -606,6 +625,24 @@ class main_window(QMainWindow):
          
         if reply == QMessageBox.Yes:
             self.reset_DW()
+
+    def remove_im_files(self):
+        """Ask the user if they want to remove image files from the read image
+        path since the dir watcher only notices file created not modified"""
+        text = 'The directory watcher only notices file creation events, not modifications.\n'
+        text += 'Therefore the image read path must be emptied so new files can be created.\n'
+        text += '\nDelete the following files from '+self.dir_watcher.image_read_path+"?\n"
+        file_list = []
+        for file_name in os.listdir(self.dir_watcher.image_read_path):
+            if '.asc' in file_name:
+                text += "\t - " + file_name + "\n"
+                file_list.append(file_name)
+
+        reply = QMessageBox.question(self, 'Remove Initial Image files?',
+            text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            for file_name in file_list:
+                os.remove(os.path.join(self.dir_watcher.image_read_path, file_name))
             
     def reset_DW(self):
         """Initiate the dir watcher. If there is already one running, stop the 
@@ -616,9 +653,12 @@ class main_window(QMainWindow):
             self.dir_watcher = None
             self.dw_status_label.setText("Stopped")
             self.dw_init_button.setText('Initiate directory watcher')
+            self.recent_label.setText('')
 
         else: 
+            # prompt user if they want to remove image files 
             self.dir_watcher = dir_watcher()
+            self.remove_im_files()
             self.dir_watcher.event_handler.event_path.connect(self.update_plot)
             self.dw_status_label.setText("Running")
             msg = QMessageBox()
@@ -638,8 +678,8 @@ class main_window(QMainWindow):
         x0, y0 = self.roi.pos()  # lower left corner of bounding rectangle
         xw, yw = self.roi.size() # widths
         l = int(0.5*(xw+yw))  # want a square ROI
-        # note: setting the origing as bottom left but the image has origin top left
-        xc, yc = int(x0 + l//2), self.image_handler.pic_size - int(y0 + l//2)  # centre
+        # note: setting the origin as bottom left but the image has origin top left
+        xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
         self.image_handler.set_roi(dimensions=[xc, yc, l])
         self.xc_label.setText('ROI x_c = '+str(xc)) 
         self.yc_label.setText('ROI y_c = '+str(yc))
@@ -674,7 +714,7 @@ class main_window(QMainWindow):
         self.l_label.setText('ROI size = '+str(l))
         # update ROI on image canvas
         # note: setting the origing as bottom left but the image has origin top left
-        self.roi.setPos(xc - l//2, self.image_handler.pic_size - yc - l//2)
+        self.roi.setPos(xc - l//2, yc - l//2)
         self.roi.setSize(l, l)
         
         
@@ -793,9 +833,9 @@ class main_window(QMainWindow):
         bins, occ, thresh = hist_function()
         
         self.hist_canvas.clear()
-        self.hist_canvas.plot(bins, occ, stepMode=True,
-                                fillLevel=0, brush = (250,250,250,250)) # histogram
-        self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen=1) # threshold line
+        self.hist_canvas.plot(bins, occ, stepMode=True, pen='k',
+                                fillLevel=0, brush = (220,220,220,220)) # histogram
+        self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen='r') # threshold line
         
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -840,8 +880,16 @@ class main_window(QMainWindow):
 
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""
+        default_path = '' # default opens in the imageAnalyser.py directory
+        if self.dir_watcher:
+            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+            
         try:
-            save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File')
+            if 'PyQt4' in sys.modules:
+                save_file_name = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
+            elif 'PyQt5' in sys.modules:
+                save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
+            
             self.image_handler.save_state(save_file_name)
 
             msg = QMessageBox()
@@ -856,7 +904,7 @@ class main_window(QMainWindow):
     def check_reset(self):
         """Ask the user if they would like to reset the current data stored"""
         reply = QMessageBox.question(self, 'Confirm Data Replacement',
-            "Do you want to discard the current data before loading new data?", 
+            "Do you want to discard the current data?", 
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
         
         if reply == QMessageBox.Cancel:
@@ -867,19 +915,44 @@ class main_window(QMainWindow):
 
         return 1
 
+    def load_empty_hist(self):
+        """Prompt the user with options to save the data and then reset the 
+        histogram"""
+        reply = QMessageBox.question(self, 'Confirm reset', 
+            'Save the current histogram before resetting?',
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Cancel)
+
+        if reply == QMessageBox.Cancel:
+            return 0
+        
+        elif reply == QMessageBox.Yes:
+            self.save_hist_data()  # prompt user for file name then save
+            self.image_handler.reset_arrays() # get rid of old data
+            self.hist_canvas.clear() # remove old histogram from display
+
+        elif reply == QMessageBox.No:
+            self.image_handler.reset_arrays() # get rid of old data
+            self.hist_canvas.clear() # remove old histogram from display
+        
+
     def load_from_files(self, trigger=None):
         """Prompt the user to select image files to process, then sequentially process
         them and update the histogram"""
+        default_path = '' # default opens in the imageAnalyser.py directory
+        if self.dir_watcher:
+            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+            
         if self.check_reset():
             try:
                 self.recent_label.setText('Processing files...') # comes first otherwise not executed
                 if 'PyQt4' in sys.modules:
-                    file_list = QFileDialog.getOpenFileNames(self, 'Select Files')
+                    file_list = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 elif 'PyQt5' in sys.modules:
-                    file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files')
+                    file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 for file_name in file_list:
                     self.image_handler.process(file_name)
-                    self.recent_label.setText('Just processed: '+os.path.basename(file_name))
+                    self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
                 self.plot_current_hist(self.image_handler.histogram)
                 if self.recent_label.text == 'Processing files...':
@@ -891,13 +964,17 @@ class main_window(QMainWindow):
     def load_from_csv(self, trigger=None):
         """Prompt the user to select a csv file to load histogram data from.
         It must have the specific layout that the image_handler saves in."""
+        default_path = '' # default opens in the imageAnalyser.py directory
+        if self.dir_watcher:
+            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+            
         if self.check_reset():
             try:
                 # the implementation of QFileDialog changed...
                 if 'PyQt4' in sys.modules: 
-                    file_name = QFileDialog.getOpenFileName(self, 'Select A File')
+                    file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 elif 'PyQt5' in sys.modules:
-                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File')
+                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 self.image_handler.load_from_csv(file_name)
                 self.plot_current_hist(self.image_handler.histogram)
 
@@ -906,11 +983,16 @@ class main_window(QMainWindow):
 
     def load_image(self, trigger=None):
         """Prompt the user to select an image file to display"""
+        default_path = '' # default opens in the imageAnalyser.py directory
+        if self.dir_watcher:
+            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+            
+        
         try:
             if 'PyQt4' in sys.modules:
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File')
+                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File')
+                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             if file_name:  # avoid crash if the user cancelled
                 self.update_im(file_name)
 
@@ -939,17 +1021,22 @@ class main_window(QMainWindow):
 
     def closeEvent(self, event):
         """Prompt user to save data on closing"""
-        reply = QMessageBox.question(self, 'Confirm Quit',
-            "Save before you quit?", QMessageBox.Yes |
+        reply = QMessageBox.question(self, 'Confirm Action',
+            "Save before closing?", QMessageBox.Yes |
             QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
 
         if reply == QMessageBox.Yes:
-            # save current state:
-            self.save_hist_data()
-                            
+            self.save_hist_data()         # save current state
+            
+            if self.dir_watcher:          # make sure that the directory watcher stops
+                self.dir_watcher.observer.stop()
+                
             event.accept()
         
         elif reply == QMessageBox.No:
+            if self.dir_watcher: # make sure that the directory watcher stops
+                self.dir_watcher.observer.stop()
+                
             event.accept()
             
         else:
