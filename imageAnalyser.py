@@ -3,39 +3,41 @@ Stefan Spence 26/02/19
 
  - watch the image_read_path directory for new images
  - save the new image with label into a dated subdirectory under image_storage_path
- - find the position of the atom in the image and integrate the signal
+ - delete the original file so that a new file with the same name can be created
+ - set an ROI on the image and take an integrated count from the pixels
  - determine atom presence by comparison with a threshold count
  - plot a histogram of signal counts, which defines the threshold
  - save file references to easily re-analyse data
 
-Assume that there are two peaks in the histogram which are separated by a 
-region of zeros
-
-Assuming that image files are ASCII
+Assume that there are two peaks in the histogram 
+Assume that image files are ASCII
 
 Use Qt to send the signal from the watchdog to a real-time plot
 """
 import os
 import sys
 import numpy as np
-import pyqtgraph as pg  # not as flexible as matplotlib but works a lot better with qt
-import shutil
+import pyqtgraph as pg    # not as flexible as matplotlib but works a lot better with qt
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
+import imageHandler as ih # process images to build up a histogram
+import directoryWatcher as dw # use watchdog to get file creation events
 import time
 # some python packages use PyQt4, some use PyQt5...
 try:
     from PyQt4.QtCore import QThread, pyqtSignal, QEvent
     from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
-            QDoubleValidator, QComboBox, QMenu, QActionGroup) 
+            QDoubleValidator, QIntValidator, QComboBox, QMenu, QActionGroup, 
+            QTabWidget, QVBoxLayout) 
 except ModuleNotFoundError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent
-    from PyQt5.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
-            QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
-            QDoubleValidator, QComboBox, QMenu, QActionGroup) 
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+    from PyQt5.QtGui import (QGridLayout, QMessageBox, QLineEdit, QIcon, 
+            QFileDialog, QDoubleValidator, QIntValidator, QComboBox, QMenu, 
+            QActionGroup, QVBoxLayout)
+    from PyQt5.QtWidgets import (QApplication, QPushButton, QWidget, QTabWidget,
+        QAction, QMainWindow, QLabel)
+
 
 
 def gauss(x, A, x0, sig):
@@ -44,390 +46,8 @@ def gauss(x, A, x0, sig):
     propagation uses a 1/e^2 width wx = 2*sig."""
     return A* np.exp(-(x-x0)**2 /2. /sig**2) 
 
+    
           
-def est_param(x, y):
-    """Generator function to estimate the parameters for a Guassian fit. 
-    Assume that the data has peaks of decreasing amplitude separated by regions of zero."""
-    A = np.max(y)          # amplitude is peak height
-    ind = np.argmax(y)     # index of peak
-    x0 = x[ind]            # centre is position of peak height
-    
-    # estimate half max at the closest index above the peak where it drops below A/2
-    try:
-        sig = abs(x0 - x[ind + np.where(y[ind:] < A/2.)[0][0]]) /1.177  # s.d. is HWHM/sqrt(2ln2) 
-        # assuming there's no y-background-offset of the Gaussian
-        top = ind + np.where(y[ind:] == 0)[0][0]  # upper edge of the peak is where the counts return to zero
-        
-    except IndexError:
-        sig = abs(x0 - x[ind-1])/1.177  # probably reached the end of the list of x values
-        top = len(x) - 1
-    
-    return A, ind, x0, sig, top
-    
-####    ####    ####    ####
-    
-# set up an event handler that is also a QObject through inheritance of QThread
-class system_event_handler(FileSystemEventHandler, QThread):
-    """The event handler responds to file creation events and emits the path
-    to the file as a signal"""
-    event_path = pyqtSignal(str)
-    
-    def __init__(self, image_storage_path, dexter_sync_file_name, date):
-        super().__init__()
-        
-        self.dfn = ""    # dexter file number
-        self.last_event_path = ""   # last event processed 
-        self.image_storage_path = image_storage_path  # directory where we copy images to
-        self.dexter_sync_file_name = dexter_sync_file_name # path to file where dexter syncs its file #
-        self.date = date # today's date
-        # self.init_t = time.time()      # time of initiation: use to test how long it takes to realise an event is started
-        self.event_t = 0           # time taken to process the last event
-        self.end_t = time.time()   # time at end of event
-        self.idle_t = 0            # time between events
-    
-    def on_created(self, event):
-        """On a new image being written, save the file with a synced label into the 
-        image storage dir"""
-        t0 = time.time()
-        self.idle_t = self.end_t - t0   # duration between end of last event and start of current event
-        # if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
-        # print("--- --- --- ---")
-        # print(event.event_type)
-        # print(event.src_path)
-        
-        time.sleep(0.3)
-        # get Dexter file number  
-        with open(self.dexter_sync_file_name, 'r') as sync_file:
-                self.dfn = str(int(sync_file.read()))
-                
-        # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
-        new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
-        try:
-            shutil.copyfile(event.src_path, new_file_name)
-        except PermissionError:
-            print("WARNING: added a pause because python tried to access the file before the other program had let go")
-            time.sleep(0.2)
-            shutil.copyfile(event.src_path, new_file_name)
-        time.sleep(0.1)  # add in latency in case it tries to delete the file before it's been saved.
-        
-        try:
-            os.remove(event.src_path)  # delete the old file so that we can see a new created file event
-        except PermissionError:
-            print("WARNING: added a pause because python tried to access the file before the other program had let go")
-            time.sleep(1)
-            os.remove(event.src_path)
-        
-        # time.sleep(0.5)
-        self.last_event_path = new_file_name  # update last event path
-        self.event_path.emit(new_file_name)  # emit signal
-        
-        self.end_t = time.time()       # time at end of current event
-        self.event_t = self.end_t - t0 # duration of event
-        
-####    ####    ####    ####        
-    
-# setup up a watcher to detect changes in the image read directory
-class dir_watcher(QThread):
-    """Watches a directory to detect changes in the files present"""
-    def __init__(self):
-        super().__init__()
-        
-        # load paths used from config.dat
-        self.dirs_list = self.get_dirs()  # handy list contains them all
-        self.image_storage_path, self.log_file_path, self.dexter_sync_file_name, self.image_read_path = self.dirs_list
-        
-        # create the watchdog object
-        self.observer = Observer()
-        
-        # get the date to be used for file labeling
-        date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
-        self.date = date[0] + date[1] + date[3]  # [day][month][year]
-        self.image_storage_path += r'\%s\%s\%s'%(date[3],date[2],date[0])
-        
-        self.event_handler = system_event_handler(self.image_storage_path, 
-                                self.dexter_sync_file_name, self.date)
-        
-        # create image storage directory by date if it doesn't already exist
-        os.makedirs(self.image_storage_path, exist_ok=True) # requies version > 3.2
-        
-        # initiate observer
-        self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
-        self.observer.start()
-    
-    @staticmethod # static method can be accessed without making an instance of the class
-    def get_dirs():
-        """Load the paths used from the config.dat file or prompt user if 
-        it can't be found"""
-        # load config file for directories or prompt user if first time setup
-        try:
-            with open('./config.dat', 'r') as config_file:
-                config_data = config_file.read().split("\n")
-        except FileNotFoundError:
-            print("config.dat file not found. This file is required for directory references.")
-            with open(input('Please supply the absolute path to config.dat\t\t'), 'r') as config_file:
-                config_data = config_file.read().split("\n")
-                
-        for row in config_data:
-            if "image storage path" in row:
-                image_storage_path = row.split('--')[-1] # where image files are saved
-            elif "log file path" in row:
-                log_file_path = row.split('--')[-1]      # where dat files of saved data and log files are saved
-            elif "dexter sync file" in row:
-                dexter_sync_file_name = row.split('--')[-1]   # where the txt from Dexter with the latest file # is saved
-            elif "image read path" in row:
-                image_read_path = row.split('--')[-1]    # where camera images are stored just after acquisition
-                
-        if os.path.split(dexter_sync_file_name)[0] == image_read_path:
-            print("WARNING: The directory watcher acts on all file change events, so the Dexter sync file path and image read path must be different.")
-        return [image_storage_path, log_file_path, dexter_sync_file_name, image_read_path]
-        
-    @staticmethod
-    def print_dirs(image_storage_path, log_file_path, dexter_sync_file_name, image_read_path):
-        """Return a string containing information on the paths used"""
-        outstr = '// list of required directories for SAIA\n'
-        outstr += 'image storage path\t--'+image_storage_path+'\n'
-        outstr += 'log file path\t\t--'+log_file_path+'\n'
-        outstr += 'dexter sync file\t\t--'+dexter_sync_file_name+'\n'
-        outstr += 'image read path\t--'+image_read_path+'\n'
-        return outstr
-    
-    def run(self):
-        pass
-        
-    def save_config(self):
-        with open('./config.dat', 'w+') as config_file:
-            config_file.write(self.print_dirs(*self.dirs_list))
-            
-            
-####    ####    ####    ####
-        
-# convert an image into its pixel counts to put into a histogram
-class image_handler:
-    """load an ROI image centred on the atom, integrate the counts,
-    then compare to the threshold
-    for speed, make an array of counts with length n. If the number of images
-    analysed exceeds (n-10) of this length then append another n"""
-    def __init__(self):
-        self.max_count = 2**16          # max count expected from the image
-        self.delim = ' '                # delimieter to use when opening files
-        self.n = 10000                  # length of array for storing counts
-        self.counts = np.zeros(self.n)  # integrated counts from atom
-        self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
-        self.std_count = np.zeros(self.n)  # list of standard deviation of counts in image
-        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
-        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
-        self.xc = 0                     # ROI centre x position 
-        self.yc = 0                     # ROI centre y position
-        self.roi_size = -1              # ROI length in pixels. default -1 takes the whole image
-        self.pic_size = 512             # number of pixels in an image
-        self.thresh = 1                 # initial threshold for atom detection
-        self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
-        # file label list length < integrated counts so that no data is lost when extra spaces have to be appended
-        self.files = np.array([None]*(self.n)) # labels of files. 
-        self.im_num = 0                 # number of images processed
-        self.im_vals = np.array([])     # the data from the last image is accessible to an image_handler instance
-        self.bin_array = []             # if bins for the histogram are supplied, plotting can be faster
-        
-    def set_pic_size(self, im_name):
-        """Set the pic size by looking at the number of columns in a file"""
-        im_vals = np.genfromtxt(im_name, delimiter=self.delim)
-        self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row number
-        return self.pic_size
-
-    def reset_arrays(self):
-        """Reset all of the histogram array data to zero"""
-        self.files = np.array([None]*(self.n)) # labels of files. 
-        self.counts = np.zeros(self.n)  # integrated counts from atom
-        self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
-        self.std_count = np.zeros(self.n)  # list of standard deviation of counts in image
-        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
-        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
-        self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
-        self.im_num = 0                 # number of images processed
-        
-        
-    def load_full_im(self, im_name):
-        """return an array with the values of the image"""
-        # np.array(Image.open(im_name)) # for bmp images
-        # return np.genfromtxt(im_name, delimiter=self.delim)#[:,1:] # first column gives column number
-        return np.loadtxt(im_name, delimiter=self.delim,
-                              usecols=range(1,self.pic_size))
-        
-    def process(self, im_name):
-        """Get the data from an image """
-        try:
-            self.add_count(im_name)
-            
-        except IndexError: # this is a bad exception - the error might be from a bad ROI rather than reaching the end of the arrays
-            # filled the array of size n so add more elements
-            if self.im_num % (self.n - 10) == 0 and self.im_num > self.n / 2:
-                self.counts = np.append(self.counts, np.zeros(self.n))
-                self.mean_count = np.append(self.counts, np.zeros(self.n)) 
-                self.std_count = np.append(self.counts, np.zeros(self.n))
-                self.xc_list = np.append(self.xc_list, np.zeros(self.n))
-                self.yc_list = np.append(self.yc_list, np.zeros(self.n))
-                self.atom = np.append(self.atom, np.zeros(self.n))
-                self.files = np.append(self.files, np.array([None]*self.n))
-            self.add_count(im_name)
-
-    def add_int_count(self, im_name):
-        """Fill in the next index of the counts by summing over the ROI region and then 
-        getting a counts/pixel. 
-        Fill in the next index of the file, xc, yc, mean, std arrays."""
-        self.im_vals = np.genfromtxt(im_name, delimiter=self.delim)[self.yc-self.roi_size//2:
-            self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]
-        # mean counts in the image (which should already be an ROI)
-        self.counts[self.im_num] = np.sum(self.im_vals) / np.size(self.im_vals)
-        
-        # naming convention: [Species]_[date]_[Dexter file #]
-        self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
-        
-        # find the position of the largest pixel
-        # note that the statistics of the background are undermined by always taking the max.
-        try:
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
-        except ValueError: # same maximum value found in more that one position
-            xcs, ycs = np.where(self.im_vals == np.max(self.im_vals))
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
-    
-        # background statistics: mean count and standard deviation across image
-        self.mean_count[self.im_num] = np.mean(self.im_vals)
-        self.std_count[self.im_num] = np.std(self.im_vals, ddof=1)
-        
-        self.im_num += 1
-            
-    def add_count(self, im_name):
-        """Fill the next index of the counts with the max count in a pixel.
-        Fill in the next index of the file, xc, yc, mean, std arrays."""
-        # could speed up by removing this if statement by having two different functions:
-        # then the bool toggle to use the ROI changes which function is used.
-        if self.roi_size > 0:
-            self.im_vals = self.load_full_im(im_name)[self.yc-self.roi_size//2:
-            self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]  # array of pixel values in ROI
-        else:
-            # note that ASCII file formats are variable... might have the last column is empty, comes out as NaN: [:,:-1]
-            # might fail if trying to go really fast because the file hasn't been filled with data yet
-            # if os.stat(im_name).st_size: # check size of file in bytes (0 if unwritten) - this check only takes 0.2ms
-            try:
-                self.im_vals = self.load_full_im(im_name)
-            except IndexError:
-                print("File was empty, waiting 0.01s and trying again")
-                time.sleep(0.1)
-                self.im_vals = self.load_full_im(im_name)
-        
-        # take the max count in the image (undermines the statistics of the background)
-        self.counts[self.im_num] = np.max(self.im_vals)
-        
-        # naming convention: [Species]_[date]_[Dexter file #]
-        self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
-        
-        # find the position of the largest pixel
-        # note that the statistics of the background are undermined by always taking the max.
-        try:
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(self.im_vals == np.max(self.im_vals))
-        except ValueError: # same maximum value found in more that one position
-            xcs, ycs = np.where(self.im_vals == np.max(self.im_vals))
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
-    
-        # background statistics: mean count and standard deviation across image
-        self.mean_count[self.im_num] = np.mean(self.im_vals)
-        self.std_count[self.im_num] = np.std(self.im_vals, ddof=1)
-        
-        self.im_num += 1
-        
-        # probability 6e-7 of being outside of 5 sigma
-        # threshold_estimate = np.mean(im_vals) + 5*np.std(im_vals, ddof=1)
-            
-    def hist_and_thresh(self):
-        """Make a histogram of the photon counts and determine a threshold for 
-        single atom presence."""
-        if np.size(self.bin_array) > 0: 
-            occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
-        else:
-            occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
-        
-        # determine a threshold separating the background peak from the single atom peak
-        # there might also be peaks from more than one atom, or they might be overlapping...
-        # a decent estimate of parameters is important for fitting
-        # guess the threshold as the midpoint of the zero region between peaks
-        # or if that doesn't exist, then the point of maximum curvature
-        # peak value, index of peak, position of peak, standard deviation
-        peak1, ind1, x1, sd1, edge1 = est_param(bins[:-1], occ)
-        try:
-            peak2, ind2, x2, sd2, edge2 = est_param(bins[edge1:-1], occ[edge1:])
-        except ValueError:
-            peak2, ind2, x2, sd2, edge2 = est_param(bins[:2 * ind1 - edge1 - 1], occ[:2 * ind1 - edge1])
-
-        self.thresh = 0.5*(x1 + x2)  # midpoint between the two peaks
-        
-        return bins, occ, self.thresh
-
-    def histogram(self):
-        """Make a histogram of the photon counts but don't update the threshold"""
-        if np.size(self.bin_array) > 0: 
-            occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
-        else:
-            occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
-        return bins, occ, self.thresh
-        
-    def set_roi(self, im_name='', dimensions=[]):
-        """Set the ROI for the image either by finding the position of the max 
-        in the file im_name, or by taking user supplied dimensions [xc, yc, 
-        roi_size]. The default is to use supplied dimensions."""
-        if np.size(dimensions) != 0:
-            self.xc, self.yc, self.roi_size = list(map(int, dimensions))
-            return 1
-            
-        elif len(im_name) != 0:
-            # presume the supplied image has an atom in and take the max
-            # pixel's position at the centre of the ROI
-            # note that the statistics of the background are undermined by always taking the max.
-            im_vals = self.load_full_im(im_name)
-            try:
-                self.xc, self.yc = np.where(im_vals == np.max(im_vals))
-            except ValueError: # same maximum value found in more that one position
-                xcs, ycs = np.where(im_vals == np.max(im_vals))
-                self.xc, self.yc = xcs[0], ycs[0]
-            return 1
-            
-        else:
-            # print("set_roi usage: supply im_name to get xc, yc or supply dimensions [xc, yc, l]")
-            return 0 
-        
-    def load_from_csv(self, file_name):
-        """Load back in the counts data from a stored csv file, leavning space
-        in the arrays to add new data as well"""
-        data = np.genfromtxt(file_name, delimiter=',', dtype=str)
-        fd = data[1:,1:].astype(float) # the numerical data
-
-        # the first row is the header
-        self.files = np.concatenate((self.files[:self.im_num], data[1:,0], np.array([None]*self.n)))
-        self.counts = np.concatenate((self.counts[:self.im_num], fd[:,0], np.zeros(self.n)))
-        self.atom = np.concatenate((self.atom[:self.im_num], fd[:,1], np.zeros(self.n)))
-        self.xc_list = np.concatenate((self.xc_list[:self.im_num], fd[:,2], np.zeros(self.n)))
-        self.yc_list = np.concatenate((self.yc_list[:self.im_num], fd[:,3], np.zeros(self.n)))
-        self.mean_count = np.concatenate((self.mean_count[:self.im_num], fd[:,4], np.zeros(self.n)))
-        self.std_count = np.concatenate((self.std_count[:self.im_num], fd[:,5], np.zeros(self.n)))
-        self.im_num += np.size(data[1:,0]) # now we have filled this many extra columns.
-
-        
-    def save_state(self, save_file_name):
-        """Save the processed data to csv"""
-        self.hist_and_thresh() # update the threshold estimate
-         
-        # atom is present if the counts are above threshold
-        self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
-        
-        out_arr = np.array((self.files[:self.im_num], self.counts[:self.im_num], 
-            self.atom[:self.im_num], self.xc_list[:self.im_num], 
-            self.yc_list[:self.im_num], self.mean_count[:self.im_num],
-            self.std_count[:self.im_num])).T
-                    
-        np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
-                header='File, Counts, Atom Detected (threshold=%s), X-pos (pix), Y-pos (pix), Mean Count, s.d.'
-                %int(self.thresh))
-            
-
 ####    ####    ####    ####
 
 # main GUI window contains all the widgets                
@@ -440,7 +60,7 @@ class main_window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.dir_watcher = None  # a button will initiate the dir watcher
-        self.image_handler = image_handler() # class to process images
+        self.image_handler = ih.image_handler() # class to process images
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.initUI()   # make the widgets
@@ -450,16 +70,19 @@ class main_window(QMainWindow):
         self.plot_time = 0     # time taken to plot the graph
 
     def initUI(self):
-        # grid layout: central main plot, params right, dir watcher status at bottom
+        # grid layout: central main plot, params above, dir watcher status at bottom
         self.centre_widget = QWidget()
+        self.tabs = QTabWidget()                   # make tabs for each main display 
+        self.centre_widget.layout = QVBoxLayout()
+        self.centre_widget.layout.addWidget(self.tabs)
+        self.centre_widget.setLayout(self.centre_widget.layout)
         self.setCentralWidget(self.centre_widget)
-        grid = QGridLayout()
-        self.centre_widget.setLayout(grid)
-
+        
         # make sure user input is float:
         double_validator = QDoubleValidator()
+        int_validator = QIntValidator()
 
-        # menubar at top keeps things tidy
+        #### menubar at top gives options ####
         menubar = self.menuBar()
         # file menubar allows you to save/load data
         file_menu = menubar.addMenu('File')
@@ -500,50 +123,112 @@ class main_window(QMainWindow):
         bin_options.setExclusive(True) # only one option checked at a time
         bin_options.triggered.connect(self.set_bins) # connect the signal
         hist_menu.addMenu(bin_menu)
-        
-            
 
+        #### tab for settings  ####
+        settings_tab = QWidget()
+        settings_grid = QGridLayout()
+        settings_tab.setLayout(settings_grid)
+        self.tabs.addTab(settings_tab, "Settings")
+
+        # get user to set the image size in pixels
+        size_label = QLabel('Image Size in Pixels: ', self)
+        settings_grid.addWidget(size_label, 0,0, 1,1)
+        self.pic_size_edit = QLineEdit(self)
+        settings_grid.addWidget(self.pic_size_edit, 0,1, 1,1)
+        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # default
+        self.pic_size_edit.textChanged[str].connect(self.pic_size_text_edit)
+        self.pic_size_edit.setValidator(double_validator)
+
+        # get image size from loading an image
+
+        # get user to set ROI:
+        # centre of ROI x position
+        roi_xc_label = QLabel('ROI x_c: ', self)
+        settings_grid.addWidget(roi_xc_label, 1,0, 1,1)
+        self.roi_x_edit = QLineEdit(self)
+        settings_grid.addWidget(self.roi_x_edit, 1,1, 1,1)
+        self.roi_x_edit.setText('0')  # default
+        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_x_edit.setValidator(int_validator) # only numbers
+        
+        # centre of ROI y position
+        roi_yc_label = QLabel('ROI y_c: ', self)
+        settings_grid.addWidget(roi_yc_label, 2,0, 1,1)
+        self.roi_y_edit = QLineEdit(self)
+        settings_grid.addWidget(self.roi_y_edit, 2,1, 1,1)
+        self.roi_y_edit.setText('0')  # default
+        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_y_edit.setValidator(int_validator) # only numbers
+        
+        # ROI size
+        roi_l_label = QLabel('ROI size: ', self)
+        settings_grid.addWidget(roi_l_label, 3,0, 1,1)
+        self.roi_l_edit = QLineEdit(self)
+        settings_grid.addWidget(self.roi_l_edit, 3,1, 1,1)
+        self.roi_l_edit.setText('1')  # default
+        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_l_edit.setValidator(int_validator) # only numbers
+        
+        # change paths used for directory watcher
+        path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
+                'Dexter Sync File: ', 'Image Read Path: ', 'Results Path: ']
+        self.path_label_edits = []
+        for i in range(len(path_label_text)):
+            new_label = QLabel(path_label_text[i], self)
+            settings_grid.addWidget(new_label, i+4,0, 1,1)
+            self.path_label_edits.append(QLineEdit(self))
+            self.path_label_edits[i].setObjectName(path_label_text[i])
+            settings_grid.addWidget(self.path_label_edits[i], i+4,1, 1,1)
+            self.path_label_edits[i].returnPressed.connect(self.path_text_edit)
+        
         # button to initiate dir watcher
         self.dw_init_button = QPushButton('Initiate directory watcher', self)
-        self.dw_init_button.clicked.connect(self.reset_DW) # function to start dir watcher
+        self.dw_init_button.clicked.connect(self.reset_DW) # function to start/stop dir watcher
         self.dw_init_button.resize(self.dw_init_button.sizeHint())
-        grid.addWidget(self.dw_init_button, 7,0, 1,2)
+        settings_grid.addWidget(self.dw_init_button, i+5,0, 1,1)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
-        grid.addWidget(self.dw_status_label, 7,2, 1,1)
+        settings_grid.addWidget(self.dw_status_label, i+5,1, 1,1)
 
         # label to show last file analysed
         self.recent_label = QLabel('', self)
-        grid.addWidget(self.recent_label, 7,3, 1,4)
+        settings_grid.addWidget(self.recent_label, i+6,0, 1,4)
+        
+
+        #### tab for histogram ####
+        hist_tab = QWidget()
+        hist_grid = QGridLayout()
+        hist_tab.setLayout(hist_grid)
+        self.tabs.addTab(hist_tab, "Histogram")
 
         # main subplot of histogram
         self.hist_canvas = pg.PlotWidget()
         self.hist_canvas.setTitle("Histogram of CCD counts")
-        grid.addWidget(self.hist_canvas, 1,0, 6,8)  # plot spans 5 rows/columns
+        hist_grid.addWidget(self.hist_canvas, 1,0, 6,8)  # plot spans 5 rows/columns
         
         # adjustable parameters: min/max counts, number of bins
         # min counts:
         min_counts_label = QLabel('Min. Counts: ', self)
-        grid.addWidget(min_counts_label, 0,0, 1,1)
+        hist_grid.addWidget(min_counts_label, 0,0, 1,1)
         self.min_counts_edit = QLineEdit(self)
-        grid.addWidget(self.min_counts_edit, 0,1, 1,1)
+        hist_grid.addWidget(self.min_counts_edit, 0,1, 1,1)
         self.min_counts_edit.textChanged[str].connect(self.bins_text_edit)
         self.min_counts_edit.setValidator(double_validator)
         
         # max counts:
         max_counts_label = QLabel('Max. Counts: ', self)
-        grid.addWidget(max_counts_label, 0,2, 1,1)
+        hist_grid.addWidget(max_counts_label, 0,2, 1,1)
         self.max_counts_edit = QLineEdit(self)
-        grid.addWidget(self.max_counts_edit, 0,3, 1,1)
+        hist_grid.addWidget(self.max_counts_edit, 0,3, 1,1)
         self.max_counts_edit.textChanged[str].connect(self.bins_text_edit)
         self.max_counts_edit.setValidator(double_validator)
         
         # number of bins
         num_bins_label = QLabel('# Bins: ', self)
-        grid.addWidget(num_bins_label, 0,4, 1,1)
+        hist_grid.addWidget(num_bins_label, 0,4, 1,1)
         self.num_bins_edit = QLineEdit(self)
-        grid.addWidget(self.num_bins_edit, 0,5, 1,1)
+        hist_grid.addWidget(self.num_bins_edit, 0,5, 1,1)
         self.num_bins_edit.textChanged[str].connect(self.bins_text_edit)
         self.num_bins_edit.setValidator(double_validator)
 
@@ -551,64 +236,83 @@ class main_window(QMainWindow):
         self.thresh_toggle = QPushButton('User Threshold: ', self)
         self.thresh_toggle.setCheckable(True)
         self.thresh_toggle.clicked[bool].connect(self.set_thresh)
-        grid.addWidget(self.thresh_toggle, 0,6, 1,1)
+        hist_grid.addWidget(self.thresh_toggle, 0,6, 1,1)
         # user inputs threshold
         self.thresh_edit = QLineEdit(self)
-        grid.addWidget(self.thresh_edit, 0,7, 1,1)
+        hist_grid.addWidget(self.thresh_edit, 0,7, 1,1)
         self.thresh_edit.textChanged[str].connect(self.bins_text_edit)
         self.thresh_edit.setValidator(double_validator)
         
-        # get user to set the image size in pixels
-        size_label = QLabel('Image Size in Pixels: ', self)
-        grid.addWidget(size_label, 0,8, 1,1)
-        self.pic_size_edit = QLineEdit(self)
-        grid.addWidget(self.pic_size_edit, 0,9, 1,1)
-        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # default
-        self.pic_size_edit.textChanged[str].connect(self.pic_size_text_edit)
-        self.pic_size_edit.setValidator(double_validator)
+        #### tab for current histogram statistics ####
+        stat_tab = QWidget()
+        stat_grid = QGridLayout()
+        stat_tab.setLayout(stat_grid)
+        self.tabs.addTab(stat_tab, 'Histogram Statistics')
+
+        self.stat_labels = {}  # dictionary of stat labels
+        label_text = ['Counts above threshold : Counts below threshold', 
+            'Number of images processed', 'Loading probability',
+            'Background peak count', 'Backgroungd peak width', 
+            'Signal peak count', 'Signal peak width', 'Separation',
+            'Threshold']
+        for i in range(len(label_text)):
+            new_label = QLabel(label_text[i], self) # description
+            stat_grid.addWidget(new_label, i,0, 1,1)
+            self.stat_labels[label_text[i]] = QLabel('', self) # value
+            stat_grid.addWidget(self.stat_labels[label_text[i]], i,1, 1,1)
+            
+        # update statistics
+        stat_update = QPushButton('Update statistics', self)
+        stat_update.clicked[bool].connect(self.update_stats)
+        stat_grid.addWidget(stat_update, i+1,0, 1,2)
+        # do Gaussian/Poissonian fit - peaks and widths
+        # clear Gaussian fit
         
+        
+        #### tab for viewing images ####
+        im_tab = QWidget()
+        im_grid = QGridLayout()
+        im_tab.setLayout(im_grid)
+        self.tabs.addTab(im_tab, 'Image')
+        # display the pic size widgets on this tab as well
+        im_size_label = QLabel('Image Size in Pixels: ', self)
+        im_grid.addWidget(im_size_label, 0,0, 1,1)
+        self.pic_size_label = QLabel('', self)
+        im_grid.addWidget(self.pic_size_label, 0,1, 1,1)
+        self.pic_size_label.setText(str(self.image_handler.pic_size)) # default
+
+        # calculate the image size from an image file
+
         # toggle to continuously plot images as they come in
         self.im_show_toggle = QPushButton('Auto-display last image', self)
         self.im_show_toggle.setCheckable(True)
         self.im_show_toggle.clicked[bool].connect(self.set_im_show)
-        grid.addWidget(self.im_show_toggle, 0,10, 1,1)
+        im_grid.addWidget(self.im_show_toggle, 0,2, 1,1)
         
-        im_grid_pos = 8 # x grid position. leave enought space for the histogram
+        im_grid_pos = 0 # starting column. 
         # centre of ROI x position
-        self.xc_label = QLabel('ROI x_c: ', self)
-        grid.addWidget(self.xc_label, 7,im_grid_pos, 1,1)
-        self.roi_x_edit = QLineEdit(self)
-        grid.addWidget(self.roi_x_edit, 7,im_grid_pos+1, 1,1)
-        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_x_edit.setValidator(double_validator)
-         
+        self.xc_label = QLabel('ROI x_c: 0', self)
+        im_grid.addWidget(self.xc_label, 7,im_grid_pos, 1,1)
+        
         # centre of ROI y position
-        self.yc_label = QLabel('ROI y_c: ', self)
-        grid.addWidget(self.yc_label, 7,im_grid_pos+2, 1,1)
-        self.roi_y_edit = QLineEdit(self)
-        grid.addWidget(self.roi_y_edit, 7,im_grid_pos+3, 1,1)
-        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_y_edit.setValidator(double_validator)
+        self.yc_label = QLabel('ROI y_c: 0', self)
+        im_grid.addWidget(self.yc_label, 7,im_grid_pos+2, 1,1)
         
         # ROI size
-        self.l_label = QLabel('ROI size: ', self)
-        grid.addWidget(self.l_label, 7,im_grid_pos+4, 1,1)
-        self.roi_l_edit = QLineEdit(self)
-        grid.addWidget(self.roi_l_edit, 7,im_grid_pos+5, 1,1)
-        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
-        self.roi_l_edit.setValidator(double_validator)
+        self.l_label = QLabel('ROI size: 1', self)
+        im_grid.addWidget(self.l_label, 7,im_grid_pos+4, 1,1)
         
         # display last image if toggle is True
         self.im_canvas = pg.ImageView()
         # self.im_canvas.ui.histogram.hide()
         # self.im_canvas.ui.menuBtn.hide()
-        grid.addWidget(self.im_canvas, 1,im_grid_pos, 6,8)
+        im_grid.addWidget(self.im_canvas, 1,im_grid_pos, 6,8)
         self.roi = self.im_canvas.roi # get the ROI from the ROI plot
         self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
         self.im_canvas.show()
 
         # choose main window position and dimensions: (xpos,ypos,width,height)
-        self.setGeometry(100, 100, 1200, 700)
+        self.setGeometry(100, 100, 850, 700)
         self.setWindowTitle('Single Atom Image Analyser')
         self.setWindowIcon(QIcon('tempicon.png'))
         
@@ -616,9 +320,9 @@ class main_window(QMainWindow):
 
     def init_DW(self):
         """Ask the user if they want to start the dir watcher or not"""
-        dir_watcher_dirs = dir_watcher.get_dirs()
+        dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
         text = "Loaded from config.dat:\n"
-        text += dir_watcher.print_dirs(*dir_watcher_dirs)
+        text += dw.dir_watcher.print_dirs(*dir_watcher_dirs) # static method
         text += "\nStart the directory watcher with these settings?"
         reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
             text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -652,26 +356,67 @@ class main_window(QMainWindow):
             self.dir_watcher.observer.stop() # ensure that the old thread stops
             self.dir_watcher = None
             self.dw_status_label.setText("Stopped")
-            self.dw_init_button.setText('Initiate directory watcher')
+            self.dw_init_button.setText('Initiate directory watcher') # turns on
             self.recent_label.setText('')
 
         else: 
             # prompt user if they want to remove image files 
-            self.dir_watcher = dir_watcher()
+            self.dir_watcher = dw.dir_watcher()
             self.remove_im_files()
             self.dir_watcher.event_handler.event_path.connect(self.update_plot)
             self.dw_status_label.setText("Running")
-            msg = QMessageBox()
+            msg = QMessageBox() # pop up box to confirm it's started
             msg.setIcon(QMessageBox.Information)
             msg.setText("Directory Watcher initiated with settings:\n"+
                 "date\t\t\t--"+self.dir_watcher.date+"\n"+
-                self.dir_watcher.print_dirs(*self.dir_watcher.dirs_list))
+                self.dir_watcher.print_dirs(*[d for d in self.dir_watcher.dirs_dict.values()]))
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
-            self.dw_init_button.setText('Stop directory watcher')
+            self.dw_init_button.setText('Stop directory watcher') # turns off
             self.setWindowTitle('Single Atom Image Analyser --- ' + self.dir_watcher.date)
+            for i, label in enumerate(self.dir_watcher.dirs_dict.values()):
+                self.path_label_edits[i].setText(label)
+
                 
     #### #### user input functions #### #### 
+
+    def path_text_edit(self, text=''):
+        """The user finishes editing an edit text box by pressing return or clicking
+        somewhere else, then the text is sent to this function to update the dir
+        watcher's paths. It is the system event handler that processes file 
+        creation events, so its paths must be updated. For consistency the dir 
+        watcher's paths are also updated."""
+        if self.dir_watcher:
+            sender = self.sender()
+            
+            for i, label in enumerate(self.dir_watcher.dirs_dict):
+                if i == 0 and label in sender.objectName(): # image storage path
+                    date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
+                    self.date = date[0] + date[1] + date[3]  # [day][month][year]
+                    new_image_storage_path = sender.text() + r'\%s\%s\%s'%(date[3],date[2],date[0])
+                    os.makedirs(new_image_storage_path, exist_ok=True) # requies Python version > 3.2
+                    self.dir_watcher.event_handler.image_storage_path = new_image_storage_path # saves files
+                    self.dir_watcher.image_storage_path = new_image_storage_path # for consistency
+                    # create image storage directory by date if it doesn't already exist
+                    
+                elif i == 1 and label in sender.objectName(): # log file path
+                    self.dir_watcher.log_file_path = sender.text()
+
+                elif i == 2 and label in sender.objectName(): # dexter sync file
+                    self.dir_watcher.event_handler.dexter_sync_file_name = sender.text() # checks current file
+                    self.dir_watcher.dexter_sync_file_name = sender.text() # for consistency
+
+                elif i == 3 and label in sender.objectName(): # image read path
+                    for path_edit in self.path_label_edits:
+                        self.dir_watcher.dirs_dict[path_edit.objectName()] = path_edit.text()
+                    self.dir_watcher.save_config()  # update the config file
+                    self.reset_DW()  # stop the dir watcher
+                    self.init_DW()   # prompt user to restart the dir watcher with new config
+                    break # the loop can't continue if the dir watcher has been deleted
+
+                elif i == 4 and label in sender.objectName(): # results path
+                    self.dir_watcher.results_path = sender.text()
+            
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""
@@ -689,31 +434,31 @@ class main_window(QMainWindow):
         """Update the specified size of an image in pixels when the user 
         edits the text in the line edit widget"""
         self.image_handler.pic_size = int(text)
+        self.pic_size_label.setText(str(self.image_handler.pic_size))
         
-    
     def roi_text_edit(self, text):
         """Update the ROI position and size every time a text edit is made by
         the user to one of the line edit widgets"""
-        [xc, yc, l] = [self.roi_x_edit.text(),
+        xc, yc, l = [self.roi_x_edit.text(),
                             self.roi_y_edit.text(), self.roi_l_edit.text()]
         if any([v == '' for v in [xc, yc, l]]):
-            xc, yc, l = 0, 0, -1 # default takes the whole image
+            xc, yc, l = 0, 0, 1 # default takes the top left pixel
         else:
-            xc, yc, l = list(map(int, [xc, yc, l]))
+            xc, yc, l = list(map(int, [xc, yc, l])) # crashes if the user inputs float
         
         if (xc - l//2 < 0 or yc - l//2 < 0 
             or xc + l//2 > self.image_handler.pic_size 
             or yc + l//2 > self.image_handler.pic_size):
             l = 2*min([xc, yc])  # can't have the boundary go off the edge
         if int(l) == 0:
-            l = -1 # can't have zero width
+            l = 1 # can't have zero width
         
         self.image_handler.set_roi(dimensions=list(map(int, [xc, yc, l])))
         self.xc_label.setText('ROI x_c = '+str(xc)) 
         self.yc_label.setText('ROI y_c = '+str(yc))
         self.l_label.setText('ROI size = '+str(l))
         # update ROI on image canvas
-        # note: setting the origing as bottom left but the image has origin top left
+        # note: setting the origin as top left because image is inverted
         self.roi.setPos(xc - l//2, yc - l//2)
         self.roi.setSize(l, l)
         
@@ -737,7 +482,7 @@ class main_window(QMainWindow):
                 new_vals[2] = 20 + self.image_handler.im_num // 20
             if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
                 new_vals = [0, 1, 10]
-            if int(new_vals[2]) < 1:
+            if int(new_vals[2]) < 2:
                 # 0 bins causes value error
                 new_vals[2] = 10
             min_bin, max_bin, num_bins = list(map(int, new_vals))
@@ -756,6 +501,32 @@ class main_window(QMainWindow):
             
     
     #### #### toggle functions #### #### 
+
+    def update_stats(self, toggle=True):
+        """Update the statistics from the current histogram"""
+        if self.image_handler.im_num > 0: # only update if a histogram exists
+            self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
+
+            atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
+            empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
+
+            self.stat_labels['Counts above threshold : Counts below threshold'].setText(
+                                                str(atom_count) + ' : ' + str(empty_count))
+            self.stat_labels['Number of images processed'].setText(str(self.image_handler.im_num))
+            self.stat_labels['Loading probability'].setText('%.3g'%(atom_count/self.image_handler.im_num))
+            if np.size(self.image_handler.peak_counts) == 2:
+                self.stat_labels['Background peak count'].setText(str(int(self.image_handler.peak_counts[0])))
+                self.stat_labels['Backgroungd peak width'].setText(str(int(self.image_handler.peak_widths[0])))
+                self.stat_labels['Signal peak count'].setText(str(int(self.image_handler.peak_counts[1])))
+                self.stat_labels['Signal peak width'].setText(str(int(self.image_handler.peak_widths[1])))
+                self.stat_labels['Separation'].setText(str(int(self.image_handler.peak_counts[1] - 
+                                self.image_handler.peak_counts[0])))
+            else:
+                self.stat_labels['Background peak count'].setText('Peak calculation failed')
+                self.stat_labels['Signal peak count'].setText('')
+                self.stat_labels['Separation'].setText('')
+            self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
+
 
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is
@@ -778,12 +549,13 @@ class main_window(QMainWindow):
         """If the toggle is True, always update the widget with the last image.
         Note that disconnecting all slots means that this toggle might have to
         be reset when other buttons are pressed."""
-        if toggle:
-            self.dir_watcher.event_handler.event_path.connect(self.update_im)
-        else:
-            try: # note: it could have been connected several times... need while True: ... break
-                self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
-            except Exception: pass # if it's already been disconnected 
+        if self.dir_watcher:
+            if toggle:
+                self.dir_watcher.event_handler.event_path.connect(self.update_im)
+            else:
+                try: # note: it could have been connected several times... need while True: ... break
+                    self.dir_watcher.event_handler.event_path.disconnect(self.update_im)
+                except Exception: pass # if it's already been disconnected 
 
     def swap_signals(self):
         """Disconnect the image_handler process signal from the dir_watcher event
@@ -811,7 +583,10 @@ class main_window(QMainWindow):
         elif self.bin_actions[0].isChecked(): # automatic
             self.swap_signals()  # disconnect image handler, reconnect plot
             self.image_handler.bin_array = []
-            self.plot_current_hist(self.image_handler.histogram)
+            if self.thresh_toggle.isChecked():
+                self.plot_current_hist(self.image_handler.histogram)
+            else:
+                self.plot_current_hist(self.image_handler.hist_and_thresh)
 
         elif self.bin_actions[2].isChecked(): # no update
             try: # disconnect all slots
@@ -836,7 +611,8 @@ class main_window(QMainWindow):
         self.hist_canvas.plot(bins, occ, stepMode=True, pen='k',
                                 fillLevel=0, brush = (220,220,220,220)) # histogram
         self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen='r') # threshold line
-        
+
+    
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
         display the image from the file in the image canvas"""
@@ -858,6 +634,7 @@ class main_window(QMainWindow):
         self.recent_label.setText('Just processed: '+os.path.basename(event_path))
         
         self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
+
         self.plot_time = time.time() - t2
 
     def update_plot_only(self, event_path):
@@ -878,11 +655,24 @@ class main_window(QMainWindow):
 
 #### #### save and load data functions #### ####
 
+    def get_default_path(self, default_path='', option='hist'):
+        """If the directory watcher is active, set its results path attribute as the
+        default path when a file browser is opened.
+        default_path: set the default path if the directory watcher isn't running
+        option: 'hist' takes the results path where histograms are stored
+                'im' takes the image storage path for loading images"""
+        date = time.strftime("%Y %B %d", time.localtime()).split(" ") # day, long month, year
+        
+        if self.dir_watcher and option=='hist':    # make results path the default
+            default_path = self.dir_watcher.results_path + r'\%s\%s\%s'%(date[0], date[1], date[2]) 
+        elif self.dir_watcher and option=='im':
+            default_path = self.dir_watcher.image_storage_path
+        
+        return default_path
+
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""
-        default_path = '' # default opens in the imageAnalyser.py directory
-        if self.dir_watcher:
-            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+        default_path = self.get_default_path()
             
         try:
             if 'PyQt4' in sys.modules:
@@ -939,9 +729,7 @@ class main_window(QMainWindow):
     def load_from_files(self, trigger=None):
         """Prompt the user to select image files to process, then sequentially process
         them and update the histogram"""
-        default_path = '' # default opens in the imageAnalyser.py directory
-        if self.dir_watcher:
-            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+        default_path = self.get_default_path(option='im')
             
         if self.check_reset():
             try:
@@ -954,7 +742,7 @@ class main_window(QMainWindow):
                     self.image_handler.process(file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
-                self.plot_current_hist(self.image_handler.histogram)
+                self.plot_current_hist(self.image_handler.hist_and_thresh)
                 if self.recent_label.text == 'Processing files...':
                     self.recent_label.setText('Finished Processing')
 
@@ -964,9 +752,7 @@ class main_window(QMainWindow):
     def load_from_csv(self, trigger=None):
         """Prompt the user to select a csv file to load histogram data from.
         It must have the specific layout that the image_handler saves in."""
-        default_path = '' # default opens in the imageAnalyser.py directory
-        if self.dir_watcher:
-            default_path = self.dir_watcher.image_storage_path # make image storage path the default
+        default_path = self.get_default_path()
             
         if self.check_reset():
             try:
@@ -976,17 +762,14 @@ class main_window(QMainWindow):
                 elif 'PyQt5' in sys.modules:
                     file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 self.image_handler.load_from_csv(file_name)
-                self.plot_current_hist(self.image_handler.histogram)
+                self.plot_current_hist(self.image_handler.hist_and_thresh)
 
             except OSError:
                 pass # user cancelled - file not found
 
     def load_image(self, trigger=None):
         """Prompt the user to select an image file to display"""
-        default_path = '' # default opens in the imageAnalyser.py directory
-        if self.dir_watcher:
-            default_path = self.dir_watcher.image_storage_path # make image storage path the default
-            
+        default_path = self.get_default_path(option='im')
         
         try:
             if 'PyQt4' in sys.modules:
