@@ -63,13 +63,35 @@ class main_window(QMainWindow):
         self.image_handler = ih.image_handler() # class to process images
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
-        self.initUI()   # make the widgets
+        self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
+        self.init_UI()  # make the widgets
         self.init_DW()  # ask the user if they want to start the dir watcher
+        self.init_log() # write header to the log file that collects histograms
         self.t0 = time.time()  # time of initiation
         self.int_time = 0      # time taken to process an image
         self.plot_time = 0     # time taken to plot the graph
 
-    def initUI(self):
+    def init_log(self):
+        """Create a directory for today's date as a subdirectory in the log file path
+        then write the header to the log file path defined in config.dat"""
+        dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
+        # make subdirectory if it doesn't already exist
+        log_file_dir = dir_watcher_dirs[1]+'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0]) 
+        os.makedirs(log_file_dir, exist_ok=True)
+
+        self.log_file_name = os.path.join(log_file_dir, 
+                   'log'+self.date[0]+self.date[1]+self.date[3]+'.dat')  
+        # write the header to the log file
+        with open(self.log_file_name, 'w+') as f:
+            f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
+            f.write('include --[]\n')
+            f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
+                'Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
+                'Threshold, Images Processed\n')
+       
+
+    def init_UI(self):
+        """Create all of the widget objects required"""
         # grid layout: central main plot, params above, dir watcher status at bottom
         self.centre_widget = QWidget()
         self.tabs = QTabWidget()                   # make tabs for each main display 
@@ -131,7 +153,7 @@ class main_window(QMainWindow):
         self.tabs.addTab(settings_tab, "Settings")
 
         # get user to set the image size in pixels
-        size_label = QLabel('Image Size in Pixels: ', self)
+        size_label = QLabel('Image size in pixels: ', self)
         settings_grid.addWidget(size_label, 0,0, 1,1)
         self.pic_size_edit = QLineEdit(self)
         settings_grid.addWidget(self.pic_size_edit, 0,1, 1,1)
@@ -140,6 +162,10 @@ class main_window(QMainWindow):
         self.pic_size_edit.setValidator(double_validator)
 
         # get image size from loading an image
+        load_im_size = QPushButton('Load size from image', self)
+        load_im_size.clicked.connect(self.load_im_size) # load image size from image
+        load_im_size.resize(load_im_size.sizeHint())
+        settings_grid.addWidget(load_im_size, 0,2, 1,1)
 
         # get user to set ROI:
         # centre of ROI x position
@@ -249,13 +275,21 @@ class main_window(QMainWindow):
         stat_tab.setLayout(stat_grid)
         self.tabs.addTab(stat_tab, 'Histogram Statistics')
 
+        # user variable value
+        user_var_label = QLabel('Variable value: ', self)
+        stat_grid.addWidget(roi_l_label, 0,0, 1,1)
+        self.var_edit = QLineEdit(self)
+        stat_grid.addWidget(self.var_edit, 0,1, 1,1)
+        self.var_edit.setText('0')  # default
+        self.var_edit.setValidator(double_validator) # only numbers
+
         self.stat_labels = {}  # dictionary of stat labels
         label_text = ['Counts above threshold : Counts below threshold', 
             'Number of images processed', 'Loading probability',
             'Background peak count', 'Backgroungd peak width', 
             'Signal peak count', 'Signal peak width', 'Separation',
             'Threshold']
-        for i in range(len(label_text)):
+        for i in range(1, 1+len(label_text)):
             new_label = QLabel(label_text[i], self) # description
             stat_grid.addWidget(new_label, i,0, 1,1)
             self.stat_labels[label_text[i]] = QLabel('', self) # value
@@ -280,8 +314,6 @@ class main_window(QMainWindow):
         self.pic_size_label = QLabel('', self)
         im_grid.addWidget(self.pic_size_label, 0,1, 1,1)
         self.pic_size_label.setText(str(self.image_handler.pic_size)) # default
-
-        # calculate the image size from an image file
 
         # toggle to continuously plot images as they come in
         self.im_show_toggle = QPushButton('Auto-display last image', self)
@@ -361,19 +393,28 @@ class main_window(QMainWindow):
 
         else: 
             # prompt user if they want to remove image files 
-            self.dir_watcher = dw.dir_watcher()
-            self.remove_im_files()
-            self.dir_watcher.event_handler.event_path.connect(self.update_plot)
+            self.dir_watcher = dw.dir_watcher() # instantiate dir watcher
+            self.remove_im_files() # prompt to remove image files
+            self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
             self.dw_status_label.setText("Running")
+
+            # get current date
+            self.date = self.dir_watcher.date
+            date_str = ' '.join(list(map(str, self.date[0]+self.date[2:]))) 
+            self.init_log() # make a new log file
+
             msg = QMessageBox() # pop up box to confirm it's started
             msg.setIcon(QMessageBox.Information)
             msg.setText("Directory Watcher initiated with settings:\n"+
-                "date\t\t\t--"+self.dir_watcher.date+"\n"+
+                "date\t\t\t--" + date_str + "\n"+
                 self.dir_watcher.print_dirs(*[d for d in self.dir_watcher.dirs_dict.values()]))
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             self.dw_init_button.setText('Stop directory watcher') # turns off
-            self.setWindowTitle('Single Atom Image Analyser --- ' + self.dir_watcher.date)
+            # display current date on window title
+            self.setWindowTitle('Single Atom Image Analyser --- ' + date_str)
+
+            # set current file paths
             for i, label in enumerate(self.dir_watcher.dirs_dict.values()):
                 self.path_label_edits[i].setText(label)
 
@@ -391,13 +432,11 @@ class main_window(QMainWindow):
             
             for i, label in enumerate(self.dir_watcher.dirs_dict):
                 if i == 0 and label in sender.objectName(): # image storage path
-                    date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
-                    self.date = date[0] + date[1] + date[3]  # [day][month][year]
-                    new_image_storage_path = sender.text() + r'\%s\%s\%s'%(date[3],date[2],date[0])
+                    new_image_storage_path = sender.text() + r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
+                    # create image storage directory by date if it doesn't already exist
                     os.makedirs(new_image_storage_path, exist_ok=True) # requies Python version > 3.2
                     self.dir_watcher.event_handler.image_storage_path = new_image_storage_path # saves files
                     self.dir_watcher.image_storage_path = new_image_storage_path # for consistency
-                    # create image storage directory by date if it doesn't already exist
                     
                 elif i == 1 and label in sender.objectName(): # log file path
                     self.dir_watcher.log_file_path = sender.text()
@@ -513,22 +552,29 @@ class main_window(QMainWindow):
             self.stat_labels['Counts above threshold : Counts below threshold'].setText(
                                                 str(atom_count) + ' : ' + str(empty_count))
             self.stat_labels['Number of images processed'].setText(str(self.image_handler.im_num))
-            self.stat_labels['Loading probability'].setText('%.3g'%(atom_count/self.image_handler.im_num))
+            loading_prob = atom_count/self.image_handler.im_num
+            self.stat_labels['Loading probability'].setText('%.3g'%(loading_prob))
+            peak_stats = [0]*5  # values if calculation fails
             if np.size(self.image_handler.peak_counts) == 2:
-                self.stat_labels['Background peak count'].setText(str(int(self.image_handler.peak_counts[0])))
-                self.stat_labels['Backgroungd peak width'].setText(str(int(self.image_handler.peak_widths[0])))
-                self.stat_labels['Signal peak count'].setText(str(int(self.image_handler.peak_counts[1])))
-                self.stat_labels['Signal peak width'].setText(str(int(self.image_handler.peak_widths[1])))
-                self.stat_labels['Separation'].setText(str(int(self.image_handler.peak_counts[1] - 
-                                self.image_handler.peak_counts[0])))
+                peak_stats[0] = int(self.image_handler.peak_counts[0])
+                self.stat_labels['Background peak count'].setText(str(peak_stats[0]))
+                peak_stats[1] = int(self.image_handler.peak_widths[0])
+                self.stat_labels['Background peak width'].setText(str(peak_stats[1]))
+                peak_stats[2] = int(self.image_handler.peak_counts[1])
+                self.stat_labels['Signal peak count'].setText(str(peak_stats[3]))
+                peak_stats[3] = int(self.image_handler.peak_widths[1])
+                self.stat_labels['Signal peak width'].setText(str(peak_stas[4]))
+                peak_stats[4] = int(self.image_handler.peak_counts[1] - 
+                                        self.image_handler.peak_counts[0])
+                self.stat_labels['Separation'].setText(str(peak_stats[4]))
             else:
                 self.stat_labels['Background peak count'].setText('Peak calculation failed')
                 self.stat_labels['Signal peak count'].setText('')
                 self.stat_labels['Separation'].setText('')
             self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
 
-            # histogram number, user variable, variable name, loading probability, bg count, bg width, signal count, signal width, separation, threshold, images processed
-            return 1
+            # user variable, loading probability, bg count, bg width, signal count, signal width, separation, threshold, images processed
+            return np.array([float(self.var_edit.text()), loading_prob] + peak_stats + [int(self.image_handler.thresh), self.image_handler.im_num])
 
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is
@@ -672,21 +718,53 @@ class main_window(QMainWindow):
         
         return default_path
 
+
+    def load_im_size(self):
+        """Get the user to select an image file and then use this to get the image size"""
+        default_path = self.get_default_path(option='im')
+        try:
+            if 'PyQt4' in sys.modules:
+                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+            elif 'PyQt5' in sys.modules:
+                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+
+        except OSError:
+            pass # user cancelled - file not found
+
+        self.image_handler.set_pic_size(file_name) # sets image handler's pic size
+        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
+        self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
+
+
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""
         default_path = self.get_default_path()
-            
         try:
             if 'PyQt4' in sys.modules:
                 save_file_name = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             elif 'PyQt5' in sys.modules:
                 save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             
-            self.image_handler.save_state(save_file_name)
+            self.image_handler.save_state(save_file_name) # save histogram
+
+            stats = self.update_stats() # get statistics from histogram
+
+            with open(self.log_file_name, 'r') as f: # get histogram number
+                i = 0
+                for line in f:
+                    i += 1 # count the number of rows, the first 3 are headers.
+
+            # append to log file:
+            with open(self.log_file_namself.log_file_name, 'a') as f:
+                f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
+                    'Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
+                    'Threshold, Images Processed\n')
+                f.write(','.join([str(i-3)]+list(map(str, stats))) + '\n')
 
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Information)
-            msg.setText("File saved to "+save_file_name)
+            msg.setText("File saved to "+save_file_name+"\n"+
+                    "and appended to log file.")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
 

@@ -102,12 +102,11 @@ class dir_watcher(QThread):
         self.observer = Observer()
         
         # get the date to be used for file labeling
-        date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
-        self.date = date[0] + date[1] + date[3]  # [day][month][year]
-        self.image_storage_path += r'\%s\%s\%s'%(date[3],date[2],date[0])
+        self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
+        self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
         
         self.event_handler = system_event_handler(self.image_storage_path, 
-                                self.dexter_sync_file_name, self.date)
+                                self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
         
         # create image storage directory by date if it doesn't already exist
         os.makedirs(self.image_storage_path, exist_ok=True) # requies version > 3.2
