@@ -527,6 +527,8 @@ class main_window(QMainWindow):
                 self.stat_labels['Separation'].setText('')
             self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
 
+            # histogram number, user variable, variable name, loading probability, bg count, bg width, signal count, signal width, separation, threshold, images processed
+            return 1
 
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is

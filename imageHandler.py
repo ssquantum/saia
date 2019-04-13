@@ -111,25 +111,26 @@ class image_handler:
         getting a counts/pixel. 
         Fill in the next index of the file, xc, yc, mean, std arrays."""
         if self.roi_size % 2: # odd ROI length (+1 to upper bound)
-            self.im_vals = self.load_full_im(im_name)[self.yc-self.roi_size//2:
+            full_im = self.load_full_im(im_name)
+            self.im_vals = full_im[self.yc-self.roi_size//2:
             self.yc+self.roi_size//2+1, self.xc-self.roi_size//2:self.xc+self.roi_size//2+1]
 
         else:                 # even ROI length
-            self.im_vals = self.load_full_im(im_name)[self.yc-self.roi_size//2:
+            full_im = self.load_full_im(im_name)
+            self.im_vals = full_im[self.yc-self.roi_size//2:
             self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]
 
-        # sum of counts in the ROi of the image
+        # background statistics: mean count and standard deviation across image
+        self.mean_count[self.im_num] = np.mean(full_im)
+        self.std_count[self.im_num] = np.std(full_im, ddof=1)
+
+        # sum of counts in the ROI of the image gives the signal
         self.counts[self.im_num] = np.sum(self.im_vals) # / np.size(self.im_vals) # mean
         
         # naming convention: [Species]_[date]_[Dexter file #]
         self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
-        
+        # record where the centre spot is (set by the ROI) 
         self.xc_list[self.im_num], self.yc_list[self.im_num] = self.xc, self.yc
-    
-        # background statistics: mean count and standard deviation across image
-        if self.roi_size > 1:
-            self.mean_count[self.im_num] = np.mean(self.im_vals)
-            self.std_count[self.im_num] = np.std(self.im_vals, ddof=1)
         
         self.im_num += 1
             
