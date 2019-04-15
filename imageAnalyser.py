@@ -88,12 +88,13 @@ class main_window(QMainWindow):
         self.log_file_name = os.path.join(log_file_dir, 
                    'log'+self.date[0]+self.date[1]+self.date[3]+'.dat')  
         # write the header to the log file
-        with open(self.log_file_name, 'w+') as f:
-            f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
-            f.write('include --[]\n')
-            f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
-                'Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
-                'Threshold, Images Processed\n')
+        if not os.path.isfile(self.log_file_name): # don't overwrite if it already exists
+            with open(self.log_file_name, 'w+') as f:
+                f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
+                f.write('include --[]\n')
+                f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
+                    ' Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
+                    ' Threshold, Images Processed\n')
        
 
     def init_UI(self):
@@ -173,6 +174,12 @@ class main_window(QMainWindow):
         load_im_size.resize(load_im_size.sizeHint())
         settings_grid.addWidget(load_im_size, 0,2, 1,1)
 
+        # get ROI centre from loading an image
+        load_roi = QPushButton('Get ROI from image', self)
+        load_roi.clicked.connect(self.load_roi) # load roi centre from image
+        load_roi.resize(load_im_size.sizeHint())
+        settings_grid.addWidget(load_roi, 1,2, 1,1)
+
         # get user to set ROI:
         # centre of ROI x position
         roi_xc_label = QLabel('ROI x_c: ', self)
@@ -180,7 +187,7 @@ class main_window(QMainWindow):
         self.roi_x_edit = QLineEdit(self)
         settings_grid.addWidget(self.roi_x_edit, 1,1, 1,1)
         self.roi_x_edit.setText('0')  # default
-        self.roi_x_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_x_edit.textEdited[str].connect(self.roi_text_edit)
         self.roi_x_edit.setValidator(int_validator) # only numbers
         
         # centre of ROI y position
@@ -189,7 +196,7 @@ class main_window(QMainWindow):
         self.roi_y_edit = QLineEdit(self)
         settings_grid.addWidget(self.roi_y_edit, 2,1, 1,1)
         self.roi_y_edit.setText('0')  # default
-        self.roi_y_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_y_edit.textEdited[str].connect(self.roi_text_edit)
         self.roi_y_edit.setValidator(int_validator) # only numbers
         
         # ROI size
@@ -198,7 +205,7 @@ class main_window(QMainWindow):
         self.roi_l_edit = QLineEdit(self)
         settings_grid.addWidget(self.roi_l_edit, 3,1, 1,1)
         self.roi_l_edit.setText('1')  # default
-        self.roi_l_edit.textChanged[str].connect(self.roi_text_edit)
+        self.roi_l_edit.textEdited[str].connect(self.roi_text_edit)
         self.roi_l_edit.setValidator(int_validator) # only numbers
         
         # change paths used for directory watcher
@@ -476,6 +483,9 @@ class main_window(QMainWindow):
         self.xc_label.setText('ROI x_c = '+str(xc)) 
         self.yc_label.setText('ROI y_c = '+str(yc))
         self.l_label.setText('ROI size = '+str(l))
+        self.roi_x_edit.setText(str(xc))
+        self.roi_y_edit.setText(str(yc))
+        self.roi_l_edit.setText(str(l))
             
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
@@ -746,6 +756,35 @@ class main_window(QMainWindow):
             pass # user cancelled - file not found
 
 
+    def load_roi(self):
+        """Get the user to select an image file and then use this to get the ROI centre"""
+        default_path = self.get_default_path(option='im')
+        try:
+            if 'PyQt4' in sys.modules:
+                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+            elif 'PyQt5' in sys.modules:
+                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+
+            # get pic size from this image in case the user forgot to set it
+            self.image_handler.set_pic_size(file_name) # sets image handler's pic size
+            self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
+            self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
+            # get the position of the max count
+            self.image_handler.set_roi(im_name=file_name) # sets xc and yc
+            self.roi_x_edit.setText(str(self.image_handler.xc)) # update loaded value
+            self.roi_y_edit.setText(str(self.image_handler.yc)) 
+            self.roi_l_edit.setText(str(self.image_handler.roi_size))
+            self.xc_label.setText(str(self.image_handler.xc))
+            self.yc_label.setText(str(self.image_handler.yc))
+            self.l_label.setText(str(self.image_handler.roi_size))
+            self.roi.setPos(self.image_handler.xc - self.image_handler.roi_size//2, 
+            self.image_handler.yc - self.image_handler.roi_size//2) # set ROI in image display
+            self.roi.setSize(self.image_handler.roi_size, self.image_handler.roi_size)
+
+        except OSError:
+            pass # user cancelled - file not found
+
+
     def save_hist_data(self, trigger=None):
         """Prompt the user to give a directory to save the histogram data, then save"""
         default_path = self.get_default_path()
@@ -766,9 +805,6 @@ class main_window(QMainWindow):
 
             # append to log file:
             with open(self.log_file_name, 'a') as f:
-                f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
-                    'Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
-                    'Threshold, Images Processed\n')
                 f.write(','.join([str(i-3)]+list(map(str, stats))) + '\n')
 
             msg = QMessageBox()

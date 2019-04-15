@@ -88,7 +88,7 @@ class image_handler:
         # np.array(Image.open(im_name)) # for bmp images
         # return np.genfromtxt(im_name, delimiter=self.delim)#[:,1:] # first column gives column number
         return np.loadtxt(im_name, delimiter=self.delim,
-                              usecols=range(1,self.pic_size))
+                              usecols=range(1,self.pic_size+1))
         
     def process(self, im_name):
         """Get the data from an image """
@@ -114,22 +114,21 @@ class image_handler:
         Fill in the next index of the file, xc, yc, mean, std arrays."""
         full_im = self.load_full_im(im_name) # make an array of the image
         not_roi = full_im.copy()
-
         # get the ROI
         if self.roi_size % 2: # odd ROI length (+1 to upper bound)
             # ROI
-            self.im_vals = full_im[self.yc-self.roi_size//2:
-        self.yc+self.roi_size//2+1, self.xc-self.roi_size//2:self.xc+self.roi_size//2+1]
+            self.im_vals = full_im[self.xc-self.roi_size//2:self.xc+self.roi_size//2+1,
+            self.yc-self.roi_size//2:self.yc+self.roi_size//2+1]
             # background outside the ROI
-            not_roi[self.yc-self.roi_size//2:self.yc+self.roi_size//2+1, 
-            self.xc-self.roi_size//2:self.xc+self.roi_size//2+1] = np.zeros(np.shape(self.im_vals))
+            not_roi[self.xc-self.roi_size//2:self.xc+self.roi_size//2+1,
+            self.yc-self.roi_size//2:self.yc+self.roi_size//2+1] = np.zeros(np.shape(self.im_vals))
         else:                 # even ROI length
             # ROI
-            self.im_vals = full_im[self.yc-self.roi_size//2:
-            self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]
+            self.im_vals = full_im[self.xc-self.roi_size//2:self.xc+self.roi_size//2,
+            self.yc-self.roi_size//2:self.yc+self.roi_size//2]
             # background outside the ROI
-            not_roi[self.yc-self.roi_size//2:self.yc+self.roi_size//2, 
-            self.xc-self.roi_size//2:self.xc+self.roi_size//2] = np.zeros(np.shape(self.im_vals))
+            not_roi[self.xc-self.roi_size//2:self.xc+self.roi_size//2,
+            self.yc-self.roi_size//2:self.yc+self.roi_size//2] = np.zeros(np.shape(self.im_vals))
 
         # background statistics: mean count and standard deviation across image
         N = np.size(full_im) - np.size(self.im_vals)
@@ -170,7 +169,7 @@ class image_handler:
             self.peak_widths = [bins[int(self.peak_widths[0])] - bins[0], 
                                         bins[int(self.peak_widths[1])] - bins[0]]
             # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] * /2. /np.sqrt(2*np.log(2))
+            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] /2. /np.sqrt(2*np.log(2))
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
@@ -196,13 +195,9 @@ class image_handler:
         elif len(im_name) != 0:
             # presume the supplied image has an atom in and take the max
             # pixel's position at the centre of the ROI
-            # note that the statistics of the background are undermined by always taking the max.
             im_vals = self.load_full_im(im_name)
-            try:
-                self.xc, self.yc = np.where(im_vals == np.max(im_vals))
-            except ValueError: # same maximum value found in more that one position
-                xcs, ycs = np.where(im_vals == np.max(im_vals))
-                self.xc, self.yc = xcs[0], ycs[0]
+            xcs, ycs  = np.where(im_vals == np.max(im_vals))
+            self.xc, self.yc = xcs[0], ycs[0]
             return 1
             
         else:
