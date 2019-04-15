@@ -113,19 +113,28 @@ class image_handler:
         getting a counts/pixel. 
         Fill in the next index of the file, xc, yc, mean, std arrays."""
         full_im = self.load_full_im(im_name) # make an array of the image
+        not_roi = full_im.copy()
 
         # get the ROI
         if self.roi_size % 2: # odd ROI length (+1 to upper bound)
+            # ROI
             self.im_vals = full_im[self.yc-self.roi_size//2:
-            self.yc+self.roi_size//2+1, self.xc-self.roi_size//2:self.xc+self.roi_size//2+1]
-
+        self.yc+self.roi_size//2+1, self.xc-self.roi_size//2:self.xc+self.roi_size//2+1]
+            # background outside the ROI
+            not_roi[self.yc-self.roi_size//2:self.yc+self.roi_size//2+1, 
+            self.xc-self.roi_size//2:self.xc+self.roi_size//2+1] = np.zeros(np.shape(self.im_vals))
         else:                 # even ROI length
+            # ROI
             self.im_vals = full_im[self.yc-self.roi_size//2:
             self.yc+self.roi_size//2, self.xc-self.roi_size//2:self.xc+self.roi_size//2]
+            # background outside the ROI
+            not_roi[self.yc-self.roi_size//2:self.yc+self.roi_size//2, 
+            self.xc-self.roi_size//2:self.xc+self.roi_size//2] = np.zeros(np.shape(self.im_vals))
 
         # background statistics: mean count and standard deviation across image
-        self.mean_count[self.im_num] = np.mean(full_im)
-        self.std_count[self.im_num] = np.std(full_im, ddof=1)
+        N = np.size(full_im) - np.size(self.im_vals)
+        self.mean_count[self.im_num] = np.sum(not_roi) / N
+        self.std_count[self.im_num] = np.sqrt(np.sum(not_roi**2) / (N - 1))
 
         # sum of counts in the ROI of the image gives the signal
         self.counts[self.im_num] = np.sum(self.im_vals) # / np.size(self.im_vals) # mean
