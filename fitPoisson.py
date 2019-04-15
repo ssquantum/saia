@@ -1,0 +1,56 @@
+"""Single Atom Image Analysis
+Stefan Spence 15/04/19
+
+class to fit a Poissonian to a given set of data
+"""
+import numpy as np
+from scipy.optimize import curve_fit
+from scipy.special import factorial
+
+class fit:
+    """Collection of common functions for theoretical fits."""
+    def __init__(self, xdat=0, ydat=0, erry=None, param=None):
+        self.x    = xdat   # independent variable
+        self.y    = ydat   # measured dependent variable
+        self.yerr = erry   # errors in dependent variable
+        self.p0   = param  # guess of parameters for fit
+        self.ps   = param  # best fit parameters
+        self.perrs = None  # error on best fit parameters
+
+    def estGaussParam(self):
+        """Guess at the amplitude A, centre x0, width wx, and offset y0 of a 
+        Gaussian
+        Code taken from Vincent Brooks' function_fits.py"""
+        
+        # the FWHM is defined where the function drops to half of its max
+        peak = np.max(self.y)       
+        fwhm = peak
+        i = 0
+        while (fwhm - np.min(self.y)) > (peak - np.min(self.y)) / 2.:
+            fwhm = self.y[(np.argmax(self.y) + i)]
+            i += 1
+            if (np.argmax(self.y) + i == (len(self.y) - 1)):
+                break
+
+        e2_width = 2 * (self.x[(np.argmax(self.y) + i)] - self.x[(np.argmax(self.y))])
+        self.p0 = [(np.max(self.y) - np.min(self.y)), self.x[np.argmax(self.y)],
+                        e2_width, np.min(self.y)]
+    
+    def offGauss(self, x, A, x0, wx, y0):
+        """Gaussian function centred at x0 with amplitude A, 1/e^2 width wx
+        and background offset y0"""
+        return A * np.exp( -2 * (x-x0)**2 /wx**2) + y0
+    
+    def poisson(self, x, mu, A):
+        """Poisson distribution with mean mu, amplitude A"""
+        return A * np.power(mu,x) * np.exp(-mu) / factorial(x)
+    
+    def getBestFit(self, fn):
+        """Use scipy.optimize.curve_fit to get the best fit to the supplied data
+        using the supplied function fn
+        Returns tuple of best fit parameters and their errors"""
+        popt, pcov = curve_fit(fn, self.x, self.y, p0=self.p0, sigma=self.yerr,
+                                maxfev=80000)
+        self.ps = popt
+        self.perrs = np.sqrt(np.diag(pcov))
+    

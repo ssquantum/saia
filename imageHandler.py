@@ -169,8 +169,8 @@ class image_handler:
             # convert widths from indexes into counts
             self.peak_widths = [bins[int(self.peak_widths[0])] - bins[0], 
                                         bins[int(self.peak_widths[1])] - bins[0]]
-            # set the threshold in the middle of the peaks
-            self.thresh = 0.5*(bins[self.peak_indexes[0]] + bins[self.peak_indexes[1]])  
+            # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
+            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] * /2. /np.sqrt(2*np.log(2))
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 

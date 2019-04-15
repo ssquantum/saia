@@ -21,6 +21,7 @@ import pyqtgraph as pg    # not as flexible as matplotlib but works a lot better
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
 import imageHandler as ih # process images to build up a histogram
+import histoHandler as hh # collect data from histograms together
 import directoryWatcher as dw # use watchdog to get file creation events
 import time
 # some python packages use PyQt4, some use PyQt5...
@@ -61,6 +62,7 @@ class main_window(QMainWindow):
         super().__init__()
         self.dir_watcher = None  # a button will initiate the dir watcher
         self.image_handler = ih.image_handler() # class to process images
+        self.histo_handler = hh.histo_handler() # 
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
@@ -288,7 +290,7 @@ class main_window(QMainWindow):
         self.var_edit.setValidator(double_validator) # only numbers
 
         self.stat_labels = {}  # dictionary of stat labels
-        label_text = ['Counts above threshold : Counts below threshold', 
+        label_text = ['Counts above : below threshold', 
             'Number of images processed', 'Loading probability',
             'Background peak count', 'Background peak width', 
             'Signal peak count', 'Signal peak width', 'Separation',
@@ -555,7 +557,7 @@ class main_window(QMainWindow):
             atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
             empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
 
-            self.stat_labels['Counts above threshold : Counts below threshold'].setText(
+            self.stat_labels['Counts above : below threshold'].setText(
                                                 str(atom_count) + ' : ' + str(empty_count))
             self.stat_labels['Number of images processed'].setText(str(self.image_handler.im_num))
             loading_prob = np.around(atom_count/self.image_handler.im_num, 4)
