@@ -1,0 +1,5 @@
+//Single Atom Image Analyser Log File: collects histogram data
+include --[]
+Histogram, Variable, Loading Probability, Background Peak Count,Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,Threshold, Images Processed
+Histogram, Variable, Loading Probability, Background Peak Count,Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,Threshold, Images Processed
+0,0.0,0.5346534653465347,4477.0,263.0,5795.0,263.0,1317.0,5004.0,202.0

@@ -77,7 +77,11 @@ class main_window(QMainWindow):
         dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
         # make subdirectory if it doesn't already exist
         log_file_dir = dir_watcher_dirs[1]+'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0]) 
-        os.makedirs(log_file_dir, exist_ok=True)
+        try:
+            os.makedirs(log_file_dir, exist_ok=True)
+        except PermissionError:  # couldn't access the path, start a log file here
+            log_file_dir = '.\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
+            os.makedirs(log_file_dir, exist_ok=True)
 
         self.log_file_name = os.path.join(log_file_dir, 
                    'log'+self.date[0]+self.date[1]+self.date[3]+'.dat')  
@@ -277,7 +281,7 @@ class main_window(QMainWindow):
 
         # user variable value
         user_var_label = QLabel('Variable value: ', self)
-        stat_grid.addWidget(roi_l_label, 0,0, 1,1)
+        stat_grid.addWidget(user_var_label, 0,0, 1,1)
         self.var_edit = QLineEdit(self)
         stat_grid.addWidget(self.var_edit, 0,1, 1,1)
         self.var_edit.setText('0')  # default
@@ -286,20 +290,22 @@ class main_window(QMainWindow):
         self.stat_labels = {}  # dictionary of stat labels
         label_text = ['Counts above threshold : Counts below threshold', 
             'Number of images processed', 'Loading probability',
-            'Background peak count', 'Backgroungd peak width', 
+            'Background peak count', 'Background peak width', 
             'Signal peak count', 'Signal peak width', 'Separation',
             'Threshold']
         for i in range(1, 1+len(label_text)):
-            new_label = QLabel(label_text[i], self) # description
+            new_label = QLabel(label_text[i-1], self) # description
             stat_grid.addWidget(new_label, i,0, 1,1)
-            self.stat_labels[label_text[i]] = QLabel('', self) # value
-            stat_grid.addWidget(self.stat_labels[label_text[i]], i,1, 1,1)
+            self.stat_labels[label_text[i-1]] = QLabel('', self) # value
+            stat_grid.addWidget(self.stat_labels[label_text[i-1]], i,1, 1,1)
             
         # update statistics
         stat_update = QPushButton('Update statistics', self)
         stat_update.clicked[bool].connect(self.update_stats)
         stat_grid.addWidget(stat_update, i+1,0, 1,2)
+
         # do Gaussian/Poissonian fit - peaks and widths
+
         # clear Gaussian fit
         
         
@@ -552,8 +558,8 @@ class main_window(QMainWindow):
             self.stat_labels['Counts above threshold : Counts below threshold'].setText(
                                                 str(atom_count) + ' : ' + str(empty_count))
             self.stat_labels['Number of images processed'].setText(str(self.image_handler.im_num))
-            loading_prob = atom_count/self.image_handler.im_num
-            self.stat_labels['Loading probability'].setText('%.3g'%(loading_prob))
+            loading_prob = np.around(atom_count/self.image_handler.im_num, 4)
+            self.stat_labels['Loading probability'].setText(str(loading_prob))
             peak_stats = [0]*5  # values if calculation fails
             if np.size(self.image_handler.peak_counts) == 2:
                 peak_stats[0] = int(self.image_handler.peak_counts[0])
@@ -561,15 +567,17 @@ class main_window(QMainWindow):
                 peak_stats[1] = int(self.image_handler.peak_widths[0])
                 self.stat_labels['Background peak width'].setText(str(peak_stats[1]))
                 peak_stats[2] = int(self.image_handler.peak_counts[1])
-                self.stat_labels['Signal peak count'].setText(str(peak_stats[3]))
+                self.stat_labels['Signal peak count'].setText(str(peak_stats[2]))
                 peak_stats[3] = int(self.image_handler.peak_widths[1])
-                self.stat_labels['Signal peak width'].setText(str(peak_stas[4]))
+                self.stat_labels['Signal peak width'].setText(str(peak_stats[3]))
                 peak_stats[4] = int(self.image_handler.peak_counts[1] - 
                                         self.image_handler.peak_counts[0])
                 self.stat_labels['Separation'].setText(str(peak_stats[4]))
             else:
                 self.stat_labels['Background peak count'].setText('Peak calculation failed')
+                self.stat_labels['Background peak width'].setText('')
                 self.stat_labels['Signal peak count'].setText('')
+                self.stat_labels['Signal peak width'].setText('')
                 self.stat_labels['Separation'].setText('')
             self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
 
@@ -728,12 +736,12 @@ class main_window(QMainWindow):
             elif 'PyQt5' in sys.modules:
                 file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
 
+            self.image_handler.set_pic_size(file_name) # sets image handler's pic size
+            self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
+            self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
+
         except OSError:
             pass # user cancelled - file not found
-
-        self.image_handler.set_pic_size(file_name) # sets image handler's pic size
-        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
-        self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
 
 
     def save_hist_data(self, trigger=None):
@@ -755,7 +763,7 @@ class main_window(QMainWindow):
                     i += 1 # count the number of rows, the first 3 are headers.
 
             # append to log file:
-            with open(self.log_file_namself.log_file_name, 'a') as f:
+            with open(self.log_file_name, 'a') as f:
                 f.write('Histogram, Variable, Loading Probability, Background Peak Count,'+
                     'Background Peak Width, Signal Peak Count, Signal Peak Width, Separation,'+
                     'Threshold, Images Processed\n')
@@ -823,6 +831,7 @@ class main_window(QMainWindow):
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
                 self.plot_current_hist(self.image_handler.hist_and_thresh)
+                self.update_stats()
                 if self.recent_label.text == 'Processing files...':
                     self.recent_label.setText('Finished Processing')
 
@@ -843,6 +852,7 @@ class main_window(QMainWindow):
                     file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 self.image_handler.load_from_csv(file_name)
                 self.plot_current_hist(self.image_handler.hist_and_thresh)
+                self.update_stats()
 
             except OSError:
                 pass # user cancelled - file not found
