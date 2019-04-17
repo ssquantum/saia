@@ -164,17 +164,42 @@ class image_handler:
         self.peak_indexes, self.peak_heights, self.peak_widths = est_param(occ)
         self.peak_counts = bins[self.peak_indexes] + 0.5*(bins[1] - bins[0])
         
-        if np.size(self.peak_indexes) == 2: # will only find one peak if the number of bins is small
+        if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # convert widths from indexes into counts
-            self.peak_widths = [bins[int(self.peak_widths[0])] - bins[0], 
-                                        bins[int(self.peak_widths[1])] - bins[0]]
+            # assume the peak_width is the FWHM, although scipy docs aren't clear
+            self.peak_widths = [(bins[int(self.peak_widths[0])] - bins[0])/2., # /np.sqrt(2*np.log(2)), 
+                                (bins[int(self.peak_widths[1])] - bins[0])/2.] # /np.sqrt(2*np.log(2))]
             # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] /2. /np.sqrt(2*np.log(2))
+            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
 
         return bins, occ, self.thresh
+
+    def peaks_and_thresh(self):
+        """Get an estimate of the peak positions and standard deviations given a set threshold
+        Then set the threshold as 5 standard deviations above background
+        returns:
+        images processed, loading probability, bg count, bg width, signal count, signal width, 
+        separation, threshold"""
+        # split histograms at threshold then get mean and stdev:
+        ascend = np.sort(self.counts[:self.im_num])
+        bg = ascend[ascend < self.thresh]     # background
+        signal = ascend[ascend > self.thresh] # signal above threshold
+
+        bg_peak = np.mean(bg)
+        bg_stdv = np.std(bg, ddof=1)
+        at_peak = np.mean(signal)
+        at_stdv = np.std(signal, ddof=1)
+        sep = at_peak - bg_peak
+        self.thresh = bg_peak + 5*bg_stdv # update threshold
+
+        # atom is present if the counts are above threshold
+        self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
+        load_prob = np.around(np.size(np.where(self.atom > 0)[0]) / self.im_num, 4)
+
+        return np.array(self.im_num, load_prob, bg_peak, bg_stdv, at_peak, at_stdv, sep, self.thresh)
 
     def histogram(self):
         """Make a histogram of the photon counts but don't update the threshold"""

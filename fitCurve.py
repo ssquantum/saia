@@ -1,7 +1,7 @@
 """Single Atom Image Analysis
 Stefan Spence 15/04/19
 
-class to fit a Poissonian to a given set of data
+class to fit a Poissonian or Gaussian to a given set of data
 """
 import numpy as np
 from scipy.optimize import curve_fit
@@ -19,22 +19,18 @@ class fit:
 
     def estGaussParam(self):
         """Guess at the amplitude A, centre x0, width wx, and offset y0 of a 
-        Gaussian
-        Code taken from Vincent Brooks' function_fits.py"""
+        Gaussian"""
+        A = np.max(self.y) - np.min(self.y)     # peak
+        Aind = np.argmax(self.y)                # index of peak
+        x0 = self.x[Aind]                       # centre        
         
         # the FWHM is defined where the function drops to half of its max
-        peak = np.max(self.y)       
-        fwhm = peak
-        i = 0
-        while (fwhm - np.min(self.y)) > (peak - np.min(self.y)) / 2.:
-            fwhm = self.y[(np.argmax(self.y) + i)]
-            i += 1
-            if (np.argmax(self.y) + i == (len(self.y) - 1)):
-                break
-
-        e2_width = 2 * (self.x[(np.argmax(self.y) + i)] - self.x[(np.argmax(self.y))])
-        self.p0 = [(np.max(self.y) - np.min(self.y)), self.x[np.argmax(self.y)],
-                        e2_width, np.min(self.y)]
+        try: 
+            xm = self.x[Aind + np.where(self.y[Aind:] - np.min(self.y) < A/2.)[0][0]]
+        except IndexError:
+            xm = self.x[Aind - np.size(self.y[:Aind]) + np.where(self.y[:Aind] - np.min(self.y) < A/2.)[0][-1]]
+        e2_width = np.sqrt(2/np.log(2)) * abs(x0 - xm)
+        self.p0 = [A, x0, e2_width, np.min(self.y)]
     
     def offGauss(self, x, A, x0, wx, y0):
         """Gaussian function centred at x0 with amplitude A, 1/e^2 width wx
