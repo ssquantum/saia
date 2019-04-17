@@ -232,19 +232,17 @@ class image_handler:
     def load_from_csv(self, file_name):
         """Load back in the counts data from a stored csv file, leavning space
         in the arrays to add new data as well"""
-        data = np.genfromtxt(file_name, delimiter=',', dtype=str)
-        fd = data[1:,1:].astype(float) # the numerical data
-
-        # the first row is the header
-        self.files = np.concatenate((self.files[:self.im_num], data[1:,0], np.array([None]*self.n)))
-        self.counts = np.concatenate((self.counts[:self.im_num], fd[:,0], np.zeros(self.n)))
-        self.atom = np.concatenate((self.atom[:self.im_num], fd[:,1], np.zeros(self.n)))
-        self.max_count = np.concatenate((self.max_count[:self.im_num], fd[:,2], np.zeros(self.n)))
-        self.xc_list = np.concatenate((self.xc_list[:self.im_num], fd[:,2], np.zeros(self.n)))
-        self.yc_list = np.concatenate((self.yc_list[:self.im_num], fd[:,3], np.zeros(self.n)))
-        self.mean_count = np.concatenate((self.mean_count[:self.im_num], fd[:,4], np.zeros(self.n)))
-        self.std_count = np.concatenate((self.std_count[:self.im_num], fd[:,5], np.zeros(self.n)))
-        self.im_num += np.size(data[1:,0]) # now we have filled this many extra columns.
+        data = np.genfromtxt(file_name, delimiter=',')
+       
+        self.files = np.concatenate((self.files[:self.im_num], data[:,0], np.array([None]*self.n)))
+        self.counts = np.concatenate((self.counts[:self.im_num], data[:,1], np.zeros(self.n)))
+        self.atom = np.concatenate((self.atom[:self.im_num], data[:,2], np.zeros(self.n)))
+        self.max_count = np.concatenate((self.max_count[:self.im_num], data[:,3], np.zeros(self.n)))
+        self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,4], np.zeros(self.n)))
+        self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,5], np.zeros(self.n)))
+        self.mean_count = np.concatenate((self.mean_count[:self.im_num], data[:,6], np.zeros(self.n)))
+        self.std_count = np.concatenate((self.std_count[:self.im_num], data[:,7], np.zeros(self.n)))
+        self.im_num += np.size(data[:,0]) # now we have filled this many extra columns.
 
         
     def save_state(self, save_file_name):
