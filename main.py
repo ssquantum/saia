@@ -579,9 +579,16 @@ class main_window(QMainWindow):
     #### #### toggle functions #### #### 
 
     def update_stats(self, toggle=True):
-        """Update the statistics from the current histogram"""
+        """Update the statistics from the current histogram
+        image_handler uses a peak finding algorithm to get the peak positions and widths
+        from these a threshold can be set. If the user thresh_toggle is checked then the
+        threshold will not be updated."""
         if self.image_handler.im_num > 0: # only update if a histogram exists
-            self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
+            if self.thresh_toggle.isChecked(): # using manual threshold
+                self.plot_current_hist(self.image_handler.histogram) # update hist and peak stats, keep thresh
+            else:
+                self.plot_current_hist(self.image_handler.hist_and_thresh) # update hist and get peak stats
+
 
             atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
             empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
@@ -600,7 +607,6 @@ class main_window(QMainWindow):
             # signal count, signal width, separation, threshold
             self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
                 str(loading_prob)] + list(map(str, peak_stats)) + [str(int(self.image_handler.thresh))])
-
 
             # user variable, images processed, loading probability, bg count, bg width, signal count, signal width, separation, threshold
             return np.array([float(self.var_edit.text()), self.image_handler.im_num, loading_prob] + peak_stats + [int(self.image_handler.thresh)])
@@ -627,7 +633,9 @@ class main_window(QMainWindow):
                 except RuntimeError: return 0 # fit failed
                 
             # update threshold to 5 stddev above background
-            self.image_handler.thresh = best_fits[0].ps[1] + 5 * best_fits[0].ps[2]/2. 
+            if not self.thresh_toggle.isChecked(): # update thresh if not set by user
+                self.image_handler.thresh = best_fits[0].ps[1] + 5 * best_fits[0].ps[2]/2. 
+
             self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
             for bf in best_fits:
                 xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
@@ -682,6 +690,8 @@ class main_window(QMainWindow):
             except Exception: pass # if already disconnected
             if self.dir_watcher:
                 self.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
+
+            self.bins_text_edit('reset') # update histogram
         else:
             try: # disconnect all slots (including imshow...)
                 self.dir_watcher.event_handler.event_path.disconnect()
@@ -967,7 +977,6 @@ class main_window(QMainWindow):
                     self.image_handler.process(file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
-                self.plot_current_hist(self.image_handler.hist_and_thresh)
                 self.update_stats()
                 if self.recent_label.text == 'Processing files...':
                     self.recent_label.setText('Finished Processing')
@@ -988,7 +997,6 @@ class main_window(QMainWindow):
                 elif 'PyQt5' in sys.modules:
                     file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 self.image_handler.load_from_csv(file_name)
-                self.plot_current_hist(self.image_handler.hist_and_thresh)
                 self.update_stats()
 
             except OSError:

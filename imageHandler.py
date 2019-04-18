@@ -155,6 +155,19 @@ class image_handler:
     def hist_and_thresh(self):
         """Make a histogram of the photon counts and determine a threshold for 
         single atom presence."""
+        bins, occ, _ = self.histogram()
+
+        if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
+            # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
+            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
+
+        # atom is present if the counts are above threshold
+        self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
+
+        return bins, occ, self.thresh
+
+    def histogram(self):
+        """Make a histogram of the photon counts but don't update the threshold"""
         if np.size(self.bin_array) > 0: 
             occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
         else:
@@ -169,13 +182,12 @@ class image_handler:
             # assume the peak_width is the FWHM, although scipy docs aren't clear
             self.peak_widths = [(bins[int(self.peak_widths[0])] - bins[0])/2., # /np.sqrt(2*np.log(2)), 
                                 (bins[int(self.peak_widths[1])] - bins[0])/2.] # /np.sqrt(2*np.log(2))]
-            # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
 
         # atom is present if the counts are above threshold
-        self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
+        self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh
 
         return bins, occ, self.thresh
+        
 
     def peaks_and_thresh(self):
         """Get an estimate of the peak positions and standard deviations given a set threshold
@@ -201,14 +213,7 @@ class image_handler:
 
         return np.array(self.im_num, load_prob, bg_peak, bg_stdv, at_peak, at_stdv, sep, self.thresh)
 
-    def histogram(self):
-        """Make a histogram of the photon counts but don't update the threshold"""
-        if np.size(self.bin_array) > 0: 
-            occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
-        else:
-            occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
-        return bins, occ, self.thresh
-        
+    
     def set_roi(self, im_name='', dimensions=[]):
         """Set the ROI for the image either by finding the position of the max 
         in the file im_name, or by taking user supplied dimensions [xc, yc, 
