@@ -904,6 +904,8 @@ class main_window(QMainWindow):
             elif 'PyQt5' in sys.modules:
                 save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             
+            if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
+                self.plot_current_hist(self.image_handler.hist_and_thresh)
             self.image_handler.save_state(save_file_name) # save histogram
             
             stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)

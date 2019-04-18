@@ -252,7 +252,7 @@ class image_handler:
         
     def save_state(self, save_file_name):
         """Save the processed data to csv"""
-        self.hist_and_thresh() # update the threshold estimate
+        self.histogram() # update the threshold estimate
          
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
