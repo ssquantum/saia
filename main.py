@@ -343,13 +343,22 @@ class main_window(QMainWindow):
         im_grid.addWidget(self.l_label, 7,im_grid_pos+4, 1,1)
         
         # display last image if toggle is True
-        self.im_canvas = pg.ImageView()
-        # self.im_canvas.ui.histogram.hide()
-        # self.im_canvas.ui.menuBtn.hide()
-        im_grid.addWidget(self.im_canvas, 1,im_grid_pos, 6,8)
-        self.roi = self.im_canvas.roi # get the ROI from the ROI plot
+        im_widget = pg.GraphicsLayoutWidget() # containing widget
+        viewbox = im_widget.addViewBox() # plot area to display image
+        self.im_canvas = pg.ImageItem() # the image
+        viewbox.addItem(self.im_canvas)
+        im_grid.addWidget(im_widget, 1,im_grid_pos, 6,8)
+        # make an ROI that the user can drag
+        self.roi = pg.ROI([0,0], [1,1]) 
+        self.roi.addScaleHandle([1,1], [0.5,0.5]) # allow user to adjust ROI size
+        viewbox.addItem(self.roi)
+        self.roi.setZValue(10)   # make sure the ROI is drawn above the image
         self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
-        self.im_canvas.show()
+        # make a histogram to control the intensity scaling
+        self.im_hist = pg.HistogramLUTItem()
+        self.im_hist.setImageItem(self.im_canvas)
+        im_widget.addItem(self.im_hist)
+        # self.im_canvas.show()
 
 
         #### tab for plotting variables ####
@@ -772,6 +781,7 @@ class main_window(QMainWindow):
         display the image from the file in the image canvas"""
         im_vals = self.image_handler.load_full_im(event_path)
         self.im_canvas.setImage(im_vals)
+        self.im_hist.setLevels(np.min(im_vals), np.max(im_vals))
         
         
     def update_plot(self, event_path):
