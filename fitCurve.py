@@ -30,12 +30,17 @@ class fit:
         except IndexError:
             xm = self.x[Aind - np.size(self.y[:Aind]) + np.where(self.y[:Aind] - np.min(self.y) < A/2.)[0][-1]]
         e2_width = np.sqrt(2/np.log(2)) * abs(x0 - xm)
-        self.p0 = [A, x0, e2_width, np.min(self.y)]
+        # parameters: amplitude, centre, width, offset
+        self.p0 = [A, x0, e2_width] #, np.min(self.y)]
     
     def offGauss(self, x, A, x0, wx, y0):
         """Gaussian function centred at x0 with amplitude A, 1/e^2 width wx
         and background offset y0"""
         return A * np.exp( -2 * (x-x0)**2 /wx**2) + y0
+
+    def gauss(self, x, A, x0, wx):
+        """Gaussian function centred at x0 with amplitude A, and 1/e^2 width wx"""
+        return A * np.exp( -2 * (x-x0)**2 /wx**2)
     
     def poisson(self, x, mu, A):
         """Poisson distribution with mean mu, amplitude A"""

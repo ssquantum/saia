@@ -636,10 +636,10 @@ class main_window(QMainWindow):
                             fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
 
             for bf in best_fits:
-                bf.estGaussParam()            # get estimate of parameters
+                bf.estGaussParam()             # get estimate of parameters
                 try:
-                    bf.getBestFit(bf.offGauss)    # get best fit parameters
-                except RuntimeError: return 0 # fit failed
+                    bf.getBestFit(bf.gauss)    # get best fit parameters
+                except RuntimeError: return 0  # fit failed
                 
             # update threshold to 5 stddev above background
             if not self.thresh_toggle.isChecked(): # update thresh if not set by user
@@ -648,7 +648,7 @@ class main_window(QMainWindow):
             self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
             for bf in best_fits:
                 xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
-                self.hist_canvas.plot(xs, bf.offGauss(xs, *bf.ps), pen='b') # plot best fit
+                self.hist_canvas.plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
 
             # update atom statistics
             self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
@@ -685,8 +685,8 @@ class main_window(QMainWindow):
     def clear_varplot(self):
         """Clear the plot of histogram statistics by resetting the histo_handler.
         The data is not lost since it has been appended to the log file."""
-        self.histo_handler.__init__()
-        self.update_varplot_axes()
+        self.histo_handler.__init__ () # empty the stored arrays
+        self.varplot_canvas.clear()    # clear the displayed plot
 
 
     def set_thresh(self, toggle):
@@ -824,7 +824,7 @@ class main_window(QMainWindow):
         The labels are: 'Counts above : below threshold', 'Number of images processed', 
         'Loading probability', 'Background peak count', 'Background peak width', 
         'Signal peak count', 'Signal peak width', 'Separation', 'Threshold'"""
-        for i, label in enumerate(self.stat_labels.keys()):
+        for i, label in enumerate(['Counts above : below threshold']+self.histo_handler.headers[1:]):
             self.stat_labels[label].setText(args[i])
 
 
