@@ -646,16 +646,16 @@ class main_window(QMainWindow):
 
             for bf in best_fits:
                 bf.estGaussParam()             # get estimate of parameters
+                # parameters are: amplitude, centre, e^2 width
                 try:
                     bf.getBestFit(bf.gauss)    # get best fit parameters
                 except RuntimeError: return 0  # fit failed
 
-            # define the fidelity as 1 - P(false positives) - P(false negatives)
-            
-                
-            # update threshold to 5 stddev above background
+            # update threshold to where fidelity is maximum
             if not self.thresh_toggle.isChecked(): # update thresh if not set by user
-                self.image_handler.thresh = best_fits[0].ps[1] + 5 * best_fits[0].ps[2]/2. 
+                self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=50)
+            else:
+                self.image_handler.get_fidelity()
 
             self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
             for bf in best_fits:
@@ -837,19 +837,22 @@ class main_window(QMainWindow):
     def add_stats_to_plot(self, toggle=True):
         """Take the current histogram statistics from the Histogram Statistics labels
         and add the values to the variable plot, saving the parameters to the log
-        file at the same time."""
+        file at the same time. If any of the labels are empty, do nothing and return -1"""
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
-        # append current statistics to the histogram handler's list
-        self.histo_handler.vals.append(
-                np.concatenate(([float(self.var_edit.text())], list(map(float, stats)))))
-        self.update_varplot_axes()  # update the plot with the new values
-
-        hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
-        # append histogram stats to log file:
-        with open(self.log_file_name, 'a') as f:
-            f.write(','.join([str(hist_num)] + stats) + '\n')
+        if not any([s == '' for s in stats]): # only add stats if the fit is successful
+            # append current statistics to the histogram handler's list
+            self.histo_handler.vals.append(
+                    np.concatenate(([float(self.var_edit.text())], list(map(float, stats)))))
+            self.update_varplot_axes()  # update the plot with the new values
+    
+            hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
+            # append histogram stats to log file:
+            with open(self.log_file_name, 'a') as f:
+                f.write(','.join([str(hist_num)] + stats) + '\n')
         
-        return hist_num
+            return hist_num
+
+        else: return -1 # if any of the labels are empty, do nothing
 
 
     #### #### save and load data functions #### ####

@@ -153,7 +153,39 @@ class image_handler:
         
         self.im_num += 1
             
-            
+    def get_fidelity(self, thresh=None):
+        """Calculate the fidelity assuming a normal distribution for peak 1
+        centred about p1 with std dev w1 and peak 2 centred around
+        p2 with std dev w2. Optionally supply a threshold thresh, otherwise
+        use self.thresh"""
+        if thresh is None:
+            thresh = self.thresh
+
+        # fidelity = 1 - P(false positives) - P(false negatives)
+        self.fidelity = norm.cdf(thresh, self.peak_counts[0], self.peak_widths[0]
+                        ) - norm.cdf(thresh, self.peak_counts[1], self.peak_widths[1])
+        # error is largest fidelity - smallest fidelity from uncertainty in peaks
+        self.err_fidelity = norm.cdf(thresh, self.peak_counts[0] - self.peak_widths[0],
+            self.peak_widths[0]) - norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
+            self.peak_widths[1]) - norm.cdf(thresh, self.peak_counts[0] + self.peak_widths[0],
+            self.peak_widths[0]) + norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
+            self.peak_widths[1])
+
+        return self.fidelity, self.err_fidelity
+
+    def search_fidelity(self, p1, p2, n=10):
+        """Take n values for the threshold between positions p1 and p2
+        Calculate the threshold for each value and then take the max"""
+        threshes = np.linspace(p1, p2, n) # n points between peaks
+        fid, err_fid = 0, 0  # store the previous value of the fidelity
+        for th in threshes:
+            self.get_fidelity(th) # calculate fidelity for given threshold
+            if self.fidelity > fid:
+                fid, err_fid = self.fidelity, self.err_fidelity
+                self.thresh = th # the threshold at which there is max fidelity
+
+        self.fidelity, self.err_fidelity = fid, err_fid # set to the max fidelity found
+
     def hist_and_thresh(self):
         """Make a histogram of the photon counts and determine a threshold for 
         single atom presence."""
@@ -161,7 +193,9 @@ class image_handler:
 
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
+            # self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
+            # set the threshold where the fidelity is max
+            self.search_fidelity(self.peak_counts[0], self.peak_counts[1])
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
@@ -185,14 +219,7 @@ class image_handler:
             self.peak_widths = [(bins[int(self.peak_widths[0])] - bins[0])/2., # /np.sqrt(2*np.log(2)), 
                                 (bins[int(self.peak_widths[1])] - bins[0])/2.] # /np.sqrt(2*np.log(2))]
             # fidelity = 1 - P(false positives) - P(false negatives)
-            self.fidelity = norm.cdf(self.thresh, self.peak_counts[0], self.peak_widths[0]
-                            ) - norm.cdf(self.thresh, self.peak_counts[1], self.peak_widths[1])
-            # error is largest fidelity - smallest fidelity from uncertainty in peaks
-            self.err_fidelity = norm.cdf(self.thresh, self.peak_counts[0] - self.peak_widths[0],
-                self.peak_widths[0]) - norm.cdf(self.thresh, self.peak_counts[1] - self.peak_widths[1],
-                self.peak_widths[1]) - norm.cdf(self.thresh, self.peak_counts[0] + self.peak_widths[0],
-                self.peak_widths[0]) + norm.cdf(self.thresh, self.peak_counts[1] - self.peak_widths[1], 
-                self.peak_widths[1])
+            self.get_fidelity()
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh
@@ -204,8 +231,8 @@ class image_handler:
         """Get an estimate of the peak positions and standard deviations given a set threshold
         Then set the threshold as 5 standard deviations above background
         returns:
-        images processed, loading probability, bg count, bg width, signal count, signal width, 
-        separation, threshold"""
+        images processed, loading probability, error in loading probability, bg count, bg width, 
+        signal count, signal width, separation, fidelity, error in fidelity, threshold"""
         # split histograms at threshold then get mean and stdev:
         ascend = np.sort(self.counts[:self.im_num])
         bg = ascend[ascend < self.thresh]     # background
@@ -221,8 +248,14 @@ class image_handler:
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
         load_prob = np.around(np.size(np.where(self.atom > 0)[0]) / self.im_num, 4)
+        # use the binomial distribution to get 1 sigma confidence intervals:
+        conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys')
+        load_err = np.around(conf[1] - conf[0], 4)
 
-        return np.array(self.im_num, load_prob, bg_peak, bg_stdv, at_peak, at_stdv, sep, self.thresh)
+        self.get_fidelity()
+
+        return np.array(self.im_num, load_prob, load_err, bg_peak, bg_stdv, at_peak,
+                at_stdv, sep, self.fidelity, self.err_fidelity, self.thresh)
 
     
     def set_roi(self, im_name='', dimensions=[]):
