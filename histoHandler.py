@@ -13,10 +13,10 @@ class histo_handler:
     """
     def __init__(self):
         self.headers = ['User variable', 'Number of images processed', 
-            'Loading probability',
+            'Loading probability', 'Error in loading probability',
             'Background peak count', 'Background peak width', 
-            'Signal peak count', 'Signal peak width', 
-            'Separation', 'Threshold']
+            'Signal peak count', 'Signal peak width', 'Separation', 
+            'Fidelity', 'Error in fidelity', 'Threshold']
         self.vals     = [] # the variables are in the columns - [:,i]
         self.xvals    = [] # variables to plot on the x axis
         self.yvals    = [] # variables to plot on the y axis

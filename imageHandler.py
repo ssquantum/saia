@@ -14,7 +14,7 @@ import sys
 import numpy as np
 import time
 from scipy.signal import find_peaks
-
+from scipy.stats import norm
 
 def est_param(h):
     """Generator function to estimate the parameters for a Guassian fit. 
@@ -49,6 +49,8 @@ class image_handler:
         self.peak_heights = [0,0]       # heights of peaks in histogram
         self.peak_widths  = [0,0]       # widths of peaks in histogram
         self.peak_counts  = [0,0]       # peak position in counts in histogram
+        self.fidelity     = 0           # fidelity of detecting atom presence
+        self.err_fidelity = 0           # error in fidelity
         self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
         self.std_count  = np.zeros(self.n) # list of standard deviation of counts in image
         self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
@@ -182,6 +184,15 @@ class image_handler:
             # assume the peak_width is the FWHM, although scipy docs aren't clear
             self.peak_widths = [(bins[int(self.peak_widths[0])] - bins[0])/2., # /np.sqrt(2*np.log(2)), 
                                 (bins[int(self.peak_widths[1])] - bins[0])/2.] # /np.sqrt(2*np.log(2))]
+            # fidelity = 1 - P(false positives) - P(false negatives)
+            self.fidelity = norm.cdf(self.thresh, self.peak_counts[0], self.peak_widths[0]
+                            ) - norm.cdf(self.thresh, self.peak_counts[1], self.peak_widths[1])
+            # error is largest fidelity - smallest fidelity from uncertainty in peaks
+            self.err_fidelity = norm.cdf(self.thresh, self.peak_counts[0] - self.peak_widths[0],
+                self.peak_widths[0]) - norm.cdf(self.thresh, self.peak_counts[1] - self.peak_widths[1],
+                self.peak_widths[1]) - norm.cdf(self.thresh, self.peak_counts[0] + self.peak_widths[0],
+                self.peak_widths[0]) + norm.cdf(self.thresh, self.peak_counts[1] - self.peak_widths[1], 
+                self.peak_widths[1])
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh

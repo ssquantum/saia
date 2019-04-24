@@ -17,6 +17,7 @@ Use Qt to send the signal from the watchdog to a real-time plot
 import os
 import sys
 import numpy as np
+from astropy.stats import binom_conf_interval
 import pyqtgraph as pg    # not as flexible as matplotlib but works a lot better with qt
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
@@ -289,11 +290,8 @@ class main_window(QMainWindow):
         self.var_edit.setValidator(double_validator) # only numbers
 
         self.stat_labels = {}  # dictionary of stat labels
-        label_text = ['Counts above : below threshold', 
-            'Number of images processed', 'Loading probability',
-            'Background peak count', 'Background peak width', 
-            'Signal peak count', 'Signal peak width', 'Separation',
-            'Threshold']
+        # get the list of labels from the histogram handler
+        label_text = ['Counts above : below threshold'] + self.histo_handler.headers[1:]
         for i in range(1, 1+len(label_text)):
             new_label = QLabel(label_text[i-1], self) # description
             stat_grid.addWidget(new_label, i,0, 1,1)
@@ -310,6 +308,10 @@ class main_window(QMainWindow):
         fit_update.clicked[bool].connect(self.update_fit)
         stat_grid.addWidget(fit_update, i+1,1, 1,1)
 
+        # quickly add the current histogram statistics to the plot
+        add_to_plot = QPushButton('Add to plot', self)
+        add_to_plot.clicked[bool].connect(self.add_stats_to_plot)
+        stat_grid.addWidget(add_to_plot, i+1,2, 1,1)
 
         #### tab for viewing images ####
         im_tab = QWidget()
@@ -378,7 +380,7 @@ class main_window(QMainWindow):
             # connect buttons to update functions
             self.plot_labels[i].activated[str].connect(self.update_varplot_axes)
         # position labels in grid
-        plot_grid.addWidget(self.plot_labels[0], 7,3, 1,1) # bottom middle
+        plot_grid.addWidget(self.plot_labels[0], 7,4, 1,1) # bottom middle
         plot_grid.addWidget(self.plot_labels[1], 2,0, 1,1) # middle left
 
         # button to clear plot data (it's still saved in the log file)
@@ -602,8 +604,11 @@ class main_window(QMainWindow):
             atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
             empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
             loading_prob = np.around(atom_count/self.image_handler.im_num, 4)
+            # use the binomial distribution to get 1 sigma confidence intervals:
+            conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
+            loading_err = np.around(conf[1] - conf[0], 4)
 
-            peak_stats = [0]*5  # values if calculation fails
+            peak_stats = [0]*7  # values if calculation fails
             if np.size(self.image_handler.peak_counts) == 2:
                 peak_stats[0] = int(self.image_handler.peak_counts[0]) # background position
                 peak_stats[1] = int(self.image_handler.peak_widths[0]) # background width
@@ -611,14 +616,18 @@ class main_window(QMainWindow):
                 peak_stats[3] = int(self.image_handler.peak_widths[1]) # signal width
                 peak_stats[4] = int(self.image_handler.peak_counts[1] - 
                                         self.image_handler.peak_counts[0]) # separation
+                peak_stats[5] = self.image_handler.fidelity            # fidelity
+                peak_stats[6] = self.image_handler.err_fidelity        # error in fidelity
             # set text on labels:
-            # counts above:below threshold, images processed, loading probability, bg count, bg width,
-            # signal count, signal width, separation, threshold
+            # counts above:below threshold, images processed, loading probability, error in loading probability,
+            # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
             self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
-                str(loading_prob)] + list(map(str, peak_stats)) + [str(int(self.image_handler.thresh))])
+                str(loading_prob), str(loading_err)] + list(map(str, peak_stats)) + [str(int(self.image_handler.thresh))])
 
-            # user variable, images processed, loading probability, bg count, bg width, signal count, signal width, separation, threshold
-            return np.array([float(self.var_edit.text()), self.image_handler.im_num, loading_prob] + peak_stats + [int(self.image_handler.thresh)])
+            # user variable, images processed, loading probability, error in loading probability, 
+            # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+            return np.array([float(self.var_edit.text()), self.image_handler.im_num, loading_prob, loading_err] 
+                                + peak_stats + [int(self.image_handler.thresh)])
 
 
     def update_fit(self, toggle=True):
@@ -640,6 +649,9 @@ class main_window(QMainWindow):
                 try:
                     bf.getBestFit(bf.gauss)    # get best fit parameters
                 except RuntimeError: return 0  # fit failed
+
+            # define the fidelity as 1 - P(false positives) - P(false negatives)
+            
                 
             # update threshold to 5 stddev above background
             if not self.thresh_toggle.isChecked(): # update thresh if not set by user
@@ -656,15 +668,20 @@ class main_window(QMainWindow):
             atom_count = np.size(np.where(self.image_handler.atom > 0)[0]) # images with counts above threshold
             empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0]) # images with counts below threshold
             loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
+            # use the binomial distribution to get 1 sigma confidence intervals:
+            conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
+            loading_err = np.around(conf[1] - conf[0], 4)
 
-            # counts above : below threshold, images processed, loading probability, bg count, bg width, signal count, signal width, separation, threshold
+            # counts above : below threshold, images processed, loading probability, error in loading probability, 
+            # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
             # note: Gaussian beam waist is 2x standard deviation
             self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
-                str(loading_prob), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
+                str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
                 "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
-                best_fits[0].ps[1]), str(int(self.image_handler.thresh))])
+                best_fits[0].ps[1]), str(self.image_handler.fidelity), str(self.image_handler.err_fidelity),
+                str(int(self.image_handler.thresh))])
             
-
+    
     def update_varplot_axes(self, label=''):
         """The user selects which variable they want to display on the plot
         The variables are read from the x and y axis QComboBoxes
@@ -817,13 +834,31 @@ class main_window(QMainWindow):
         self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
         self.plot_time = time.time() - t2
 
+    def add_stats_to_plot(self, toggle=True):
+        """Take the current histogram statistics from the Histogram Statistics labels
+        and add the values to the variable plot, saving the parameters to the log
+        file at the same time."""
+        stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
+        # append current statistics to the histogram handler's list
+        self.histo_handler.vals.append(
+                np.concatenate(([float(self.var_edit.text())], list(map(float, stats)))))
+        self.update_varplot_axes()  # update the plot with the new values
+
+        hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
+        # append histogram stats to log file:
+        with open(self.log_file_name, 'a') as f:
+            f.write(','.join([str(hist_num)] + stats) + '\n')
+        
+        return hist_num
+
+
     #### #### save and load data functions #### ####
 
     def update_stat_labels(self, args):
         """Set the text of the histogram statistics labels to the given arguments.
         The labels are: 'Counts above : below threshold', 'Number of images processed', 
-        'Loading probability', 'Background peak count', 'Background peak width', 
-        'Signal peak count', 'Signal peak width', 'Separation', 'Threshold'"""
+        'Loading probability', 'Error in loading probability', Background peak count', 'Background peak width', 
+        'Signal peak count', 'Signal peak width', 'Separation', 'Fidelity', 'Error in fidelity', 'Threshold'"""
         for i, label in enumerate(['Counts above : below threshold']+self.histo_handler.headers[1:]):
             self.stat_labels[label].setText(args[i])
 
@@ -831,10 +866,10 @@ class main_window(QMainWindow):
     def get_stats(self):
         """Return the histogram statistics currently stored in the statistics labels
         The data type is a list of strings
-        user variable, images processed, loading probability, bg count, bg width, 
-        signal count, signal width, separation, threshold"""
+        user variable, images processed, loading probability, error in loading probability, 
+        bg count, bg width, signal count, signal width, separation, threshold"""
         stats = []
-        for label in self.stat_labels.keys():
+        for label in ['Counts above : below threshold']+self.histo_handler.headers[1:]:
             stats.append(self.stat_labels[label].text())
 
         if 'Peak calculation failed' in stats[3]:
@@ -918,16 +953,8 @@ class main_window(QMainWindow):
                 self.plot_current_hist(self.image_handler.hist_and_thresh)
             self.image_handler.save_state(save_file_name) # save histogram
             
-            stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
-            self.histo_handler.vals.append(
-                    np.concatenate(([float(self.var_edit.text())], list(map(float, stats)))))
-            self.update_varplot_axes()
-
-            hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
-            # append histogram stats to log file:
-            with open(self.log_file_name, 'a') as f:
-                f.write(','.join([str(hist_num)] + stats) + '\n')
-
+            hist_num = self.add_stats_to_plot()
+            
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Information)
             msg.setText("File saved to "+save_file_name+"\n"+
