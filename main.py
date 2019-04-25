@@ -581,6 +581,7 @@ class main_window(QMainWindow):
             if self.thresh_toggle.isChecked():
                 try:
                     self.image_handler.thresh = float(self.thresh_edit.text())
+                    self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
                 except ValueError: pass # user switched toggle before inputing text
                 self.plot_current_hist(self.image_handler.histogram) # doesn't update thresh
             else:
@@ -645,17 +646,24 @@ class main_window(QMainWindow):
                             fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
 
             for bf in best_fits:
-                bf.estGaussParam()             # get estimate of parameters
-                # parameters are: amplitude, centre, e^2 width
                 try:
+                    bf.estGaussParam()         # get estimate of parameters
+                    # parameters are: amplitude, centre, e^2 width
                     bf.getBestFit(bf.gauss)    # get best fit parameters
-                except RuntimeError: return 0  # fit failed
+                except (RuntimeError, ValueError): return 0  # fit failed
+
+            # update image handler's values for peak parameters
+            self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
+            self.image_handler.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
+            # e^2 width = 2 * sigma
+            self.image_handler.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))/2.
 
             # update threshold to where fidelity is maximum
             if not self.thresh_toggle.isChecked(): # update thresh if not set by user
-                self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=50)
+                self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=100)
             else:
-                self.image_handler.get_fidelity()
+                self.image_handler.fidelity, self.image_handler.err_fidelity = np.around(
+                                self.image_handler.get_fidelity(), 4) # round to 4 d.p.
 
             self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
             for bf in best_fits:
@@ -677,7 +685,7 @@ class main_window(QMainWindow):
             # note: Gaussian beam waist is 2x standard deviation
             self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
                 str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
-                "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
+                "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
                 best_fits[0].ps[1]), str(self.image_handler.fidelity), str(self.image_handler.err_fidelity),
                 str(int(self.image_handler.thresh))])
             
@@ -952,8 +960,9 @@ class main_window(QMainWindow):
             elif 'PyQt5' in sys.modules:
                 save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             
-            if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
-                self.plot_current_hist(self.image_handler.hist_and_thresh)
+            # don't update the threshold  - trust the user to have already set it
+            # if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
+            #     self.plot_current_hist(self.image_handler.hist_and_thresh)
             self.image_handler.save_state(save_file_name) # save histogram
             
             hist_num = self.add_stats_to_plot()

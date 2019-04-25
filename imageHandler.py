@@ -15,6 +15,7 @@ import numpy as np
 import time
 from scipy.signal import find_peaks
 from scipy.stats import norm
+from astropy.stats import binom_conf_interval
 
 def est_param(h):
     """Generator function to estimate the parameters for a Guassian fit. 
@@ -161,31 +162,32 @@ class image_handler:
         if thresh is None:
             thresh = self.thresh
 
-        # fidelity = 1 - P(false positives) - P(false negatives)
-        self.fidelity = norm.cdf(thresh, self.peak_counts[0], self.peak_widths[0]
-                        ) - norm.cdf(thresh, self.peak_counts[1], self.peak_widths[1])
-        # error is largest fidelity - smallest fidelity from uncertainty in peaks
-        self.err_fidelity = norm.cdf(thresh, self.peak_counts[0] - self.peak_widths[0],
-            self.peak_widths[0]) - norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
-            self.peak_widths[1]) - norm.cdf(thresh, self.peak_counts[0] + self.peak_widths[0],
-            self.peak_widths[0]) + norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
-            self.peak_widths[1])
-
-        return self.fidelity, self.err_fidelity
+        if np.size(self.peak_indexes) == 2: # must have already calculated peak parameters
+            # fidelity = 1 - P(false positives) - P(false negatives)
+            fidelity = norm.cdf(thresh, self.peak_counts[0], self.peak_widths[0]
+                            ) - norm.cdf(thresh, self.peak_counts[1], self.peak_widths[1])
+            # error is largest fidelity - smallest fidelity from uncertainty in peaks
+            err_fidelity = norm.cdf(thresh, self.peak_counts[0] - self.peak_widths[0],
+                self.peak_widths[0]) - norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
+                self.peak_widths[1]) - norm.cdf(thresh, self.peak_counts[0] + self.peak_widths[0],
+                self.peak_widths[0]) + norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
+                self.peak_widths[1])
+        return fidelity, err_fidelity
 
     def search_fidelity(self, p1, p2, n=10):
         """Take n values for the threshold between positions p1 and p2
         Calculate the threshold for each value and then take the max"""
         threshes = np.linspace(p1, p2, n) # n points between peaks
         fid, err_fid = 0, 0  # store the previous value of the fidelity
-        for th in threshes:
-            self.get_fidelity(th) # calculate fidelity for given threshold
-            if self.fidelity > fid:
-                fid, err_fid = self.fidelity, self.err_fidelity
-                self.thresh = th # the threshold at which there is max fidelity
-
-        self.fidelity, self.err_fidelity = fid, err_fid # set to the max fidelity found
-
+        for thresh in threshes:
+            f, fe = self.get_fidelity(thresh) # calculate fidelity for given threshold
+            if f > fid:
+                fid, err_fid = f, fe
+                self.thresh = thresh # the threshold at which there is max fidelity
+        
+        # set to max value, round to 4 d.p.
+        self.fidelity, self.err_fidelity = np.around([fid, err_fid] , 4)
+            
     def hist_and_thresh(self):
         """Make a histogram of the photon counts and determine a threshold for 
         single atom presence."""
@@ -193,7 +195,7 @@ class image_handler:
 
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            # self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0]
+            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] # in case fidelity calculation fails
             # set the threshold where the fidelity is max
             self.search_fidelity(self.peak_counts[0], self.peak_counts[1])
 
@@ -216,10 +218,10 @@ class image_handler:
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # convert widths from indexes into counts
             # assume the peak_width is the FWHM, although scipy docs aren't clear
-            self.peak_widths = [(bins[int(self.peak_widths[0])] - bins[0])/2., # /np.sqrt(2*np.log(2)), 
-                                (bins[int(self.peak_widths[1])] - bins[0])/2.] # /np.sqrt(2*np.log(2))]
+            self.peak_widths = [(bins[1] - bins[0]) * self.peak_widths[0]/2., # /np.sqrt(2*np.log(2)), 
+                                (bins[1] - bins[0]) * self.peak_widths[1]/2.] # /np.sqrt(2*np.log(2))]
             # fidelity = 1 - P(false positives) - P(false negatives)
-            self.get_fidelity()
+            self.fidelity, self. err_fidelity = np.around(self.get_fidelity(), 4)
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh
@@ -247,12 +249,14 @@ class image_handler:
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
-        load_prob = np.around(np.size(np.where(self.atom > 0)[0]) / self.im_num, 4)
+        atom_count = np.size(np.where(self.atom > 0)[0])  # images with counts above threshold
+        empty_count = np.size(np.where(self.atom[:self.im_num] == 0)[0])
+        load_prob = np.around(atom_count / self.im_num, 4)
         # use the binomial distribution to get 1 sigma confidence intervals:
         conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys')
         load_err = np.around(conf[1] - conf[0], 4)
 
-        self.get_fidelity()
+        self.fidelity, self. err_fidelity = np.around(self.get_fidelity(), 4)
 
         return np.array(self.im_num, load_prob, load_err, bg_peak, bg_stdv, at_peak,
                 at_stdv, sep, self.fidelity, self.err_fidelity, self.thresh)
@@ -282,15 +286,23 @@ class image_handler:
         """Load back in the counts data from a stored csv file, leavning space
         in the arrays to add new data as well"""
         data = np.genfromtxt(file_name, delimiter=',')
-       
-        self.files = np.concatenate((self.files[:self.im_num], data[:,0], np.array([None]*self.n)))
-        self.counts = np.concatenate((self.counts[:self.im_num], data[:,1], np.zeros(self.n)))
-        self.atom = np.concatenate((self.atom[:self.im_num], data[:,2], np.zeros(self.n)))
-        self.max_count = np.concatenate((self.max_count[:self.im_num], data[:,3], np.zeros(self.n)))
-        self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,4], np.zeros(self.n)))
-        self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,5], np.zeros(self.n)))
-        self.mean_count = np.concatenate((self.mean_count[:self.im_num], data[:,6], np.zeros(self.n)))
-        self.std_count = np.concatenate((self.std_count[:self.im_num], data[:,7], np.zeros(self.n)))
+        with open(file_name, 'r') as f:
+            header = f.readline()
+        
+        i = 0
+        self.files = np.concatenate((self.files[:self.im_num], data[:,i], np.array([None]*self.n)))
+        self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
+        self.atom = np.concatenate((self.atom[:self.im_num], data[:,i+2], np.zeros(self.n)))
+        if 'Max Count' in header:
+            self.max_count = np.concatenate((self.max_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
+            i += 4
+        else: # retain compatability with older csv files that don't contain max count
+            self.max_count = np.concatenate((self.max_count[:self.im_num], np.zeros(self.n + np.size(data[:,i]))))
+            i += 3
+        self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,i], np.zeros(self.n)))
+        self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,i+1], np.zeros(self.n)))
+        self.mean_count = np.concatenate((self.mean_count[:self.im_num], data[:,i+2], np.zeros(self.n)))
+        self.std_count = np.concatenate((self.std_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
         self.im_num += np.size(data[:,0]) # now we have filled this many extra columns.
 
         
