@@ -648,7 +648,7 @@ class main_window(QMainWindow):
                     bf.estGaussParam()         # get estimate of parameters
                     # parameters are: amplitude, centre, e^2 width
                     bf.getBestFit(bf.gauss)    # get best fit parameters
-                except (RuntimeError, ValueError): return 0  # fit failed
+                except: return 0               # fit failed, do nothing
 
             # update image handler's values for peak parameters
             self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))

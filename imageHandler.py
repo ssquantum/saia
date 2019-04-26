@@ -220,8 +220,6 @@ class image_handler:
             # assume the peak_width is the FWHM, although scipy docs aren't clear
             self.peak_widths = [(bins[1] - bins[0]) * self.peak_widths[0]/2., # /np.sqrt(2*np.log(2)), 
                                 (bins[1] - bins[0]) * self.peak_widths[1]/2.] # /np.sqrt(2*np.log(2))]
-            # fidelity = 1 - P(false positives) - P(false negatives)
-            self.fidelity, self. err_fidelity = np.around(self.get_fidelity(), 4)
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh
