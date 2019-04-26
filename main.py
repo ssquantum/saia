@@ -85,9 +85,7 @@ class main_window(QMainWindow):
             with open(self.log_file_name, 'w+') as f:
                 f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
                 f.write('include --[]\n')
-                f.write('Histogram, Variable, Images Processed, Loading Probability,'+
-                    ' Background Peak Count, Background Peak Width, Signal Peak Count,'+
-                    ' Signal Peak Width, Separation, Threshold\n')
+                f.write('Histogram, '+', '.join(self.histo_handler.headers)+'\n')
        
 
     def init_UI(self):
