@@ -389,7 +389,7 @@ class main_window(QMainWindow):
         #### choose main window position and dimensions: (xpos,ypos,width,height)
         self.setGeometry(100, 100, 850, 700)
         self.setWindowTitle('Single Atom Image Analyser')
-        self.setWindowIcon(QIcon('tempicon.png'))
+        self.setWindowIcon(QIcon('docs/tempicon.png'))
         
     #### #### initiation functions #### #### 
 
@@ -628,64 +628,78 @@ class main_window(QMainWindow):
             return np.array([float(self.var_edit.text()), self.image_handler.im_num, loading_prob, loading_err] 
                                 + peak_stats + [int(self.image_handler.thresh)])
 
+    def fit_gaussians(self):
+        """Update the histogram and fit two Gaussians, splitting the data at the threshold
+        then use the fits to calculate histogram statistics, and set the threshold where the 
+        fidelity is maximum"""
+        bins, occ, thresh = self.image_handler.histogram()  # get histogram
+        bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
+        diff = abs(bins - thresh)   # minimum is at the threshold
+        thresh_i = np.argmin(diff)  # index of the threshold
+
+        # split the histogram at the threshold value
+        best_fits = [fc.fit(bins[:thresh_i]+bin_mid, occ[:thresh_i]),
+                        fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
+
+        for bf in best_fits:
+            try:
+                bf.estGaussParam()         # get estimate of parameters
+                # parameters are: amplitude, centre, e^2 width
+                bf.getBestFit(bf.gauss)    # get best fit parameters
+            except: return 0               # fit failed, do nothing
+
+        # update image handler's values for peak parameters
+        self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
+        self.image_handler.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
+        # e^2 width = 2 * sigma
+        self.image_handler.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))/2.
+
+        # update threshold to where fidelity is maximum
+        if not self.thresh_toggle.isChecked(): # update thresh if not set by user
+            self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=100)
+        else:
+            self.image_handler.fidelity, self.image_handler.err_fidelity = np.around(
+                            self.image_handler.get_fidelity(), 4) # round to 4 d.p.
+
+        self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
+        for bf in best_fits:
+            xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
+            self.hist_canvas.plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
+
+        # update atom statistics
+        self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
+            :self.image_handler.im_num] // self.image_handler.thresh   # update atom presence
+        atom_count = np.size(np.where(self.image_handler.atom > 0)[0]) # images with counts above threshold
+        empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0]) # images with counts below threshold
+        loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
+        # use the binomial distribution to get 1 sigma confidence intervals:
+        conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
+        loading_err = np.around(conf[1] - conf[0], 4)
+
+        # counts above : below threshold, images processed, loading probability, error in loading probability, 
+        # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+        # note: Gaussian beam waist is 2x standard deviation
+        return [str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
+            str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
+            "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
+            best_fits[0].ps[1]), str(self.image_handler.fidelity), str(self.image_handler.err_fidelity),
+            str(int(self.image_handler.thresh))]
 
     def update_fit(self, toggle=True):
         """Fit Gaussians to the peaks and use it to get a better estimate of the 
         peak centres and widths. The peaks are not quite Poissonian because of the
-        bias from dark counts."""
+        bias from dark counts. Use the fits to get histogram statistics, then set 
+        the threshold to maximise fidelity. Iterate until the threshold converges."""
         if self.image_handler.im_num > 0: # only update if a histogram exists
-            bins, occ, thresh = self.image_handler.histogram()  # get histogram
-            bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
-            diff = abs(bins - thresh)   # minimum is at the threshold
-            thresh_i = np.argmin(diff)  # index of the threshold
+            oldthresh = self.image_handler.thresh # store the last value
+            diff = 1                              # convergence criterion
+            for i in range(10):          # shouldn't need many iterations
+                if diff < 0.01:
+                    break
+                new_stats = self.fit_gaussians()
+                diff = abs(oldthresh - self.image_handler.thresh) / float(oldthresh)
 
-            # split the histogram at the threshold value
-            best_fits = [fc.fit(bins[:thresh_i]+bin_mid, occ[:thresh_i]),
-                            fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
-
-            for bf in best_fits:
-                try:
-                    bf.estGaussParam()         # get estimate of parameters
-                    # parameters are: amplitude, centre, e^2 width
-                    bf.getBestFit(bf.gauss)    # get best fit parameters
-                except: return 0               # fit failed, do nothing
-
-            # update image handler's values for peak parameters
-            self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
-            self.image_handler.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
-            # e^2 width = 2 * sigma
-            self.image_handler.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))/2.
-
-            # update threshold to where fidelity is maximum
-            if not self.thresh_toggle.isChecked(): # update thresh if not set by user
-                self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=100)
-            else:
-                self.image_handler.fidelity, self.image_handler.err_fidelity = np.around(
-                                self.image_handler.get_fidelity(), 4) # round to 4 d.p.
-
-            self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
-            for bf in best_fits:
-                xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
-                self.hist_canvas.plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
-
-            # update atom statistics
-            self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
-                :self.image_handler.im_num] // self.image_handler.thresh   # update atom presence
-            atom_count = np.size(np.where(self.image_handler.atom > 0)[0]) # images with counts above threshold
-            empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0]) # images with counts below threshold
-            loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
-            # use the binomial distribution to get 1 sigma confidence intervals:
-            conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
-            loading_err = np.around(conf[1] - conf[0], 4)
-
-            # counts above : below threshold, images processed, loading probability, error in loading probability, 
-            # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
-            # note: Gaussian beam waist is 2x standard deviation
-            self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
-                str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
-                "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
-                best_fits[0].ps[1]), str(self.image_handler.fidelity), str(self.image_handler.err_fidelity),
-                str(int(self.image_handler.thresh))])
+            self.update_stat_labels(new_stats)
             
     
     def update_varplot_axes(self, label=''):
@@ -1110,9 +1124,10 @@ class main_window(QMainWindow):
             event.ignore()        
 
 ####    ####    ####    #### 
-            
-if __name__ == "__main__":
-    # if running in Pylab/IPython then there may already be an app instance
+
+def run():
+    """Initiate an app to run the program
+    if running in Pylab/IPython then there may already be an app instance"""
     app = QApplication.instance()
     standalone = app is None # false if there is already an app instance
     if standalone: # if there isn't an instance, make one
@@ -1122,3 +1137,7 @@ if __name__ == "__main__":
     main_win.show()
     if standalone: # if an app instance was made, execute it
         sys.exit(app.exec_()) # when the window is closed, the python code also stops
+
+            
+if __name__ == "__main__":
+    run()
