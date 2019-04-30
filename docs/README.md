@@ -1,4 +1,4 @@
-How to run Single Atom Image Analysis (SAIA):
+﻿How to run Single Atom Image Analysis (SAIA):
 	• Start the file: 
 		○ Execute runSAIA.bat   --- a windows batch file with a hardcoded link to the Enthought python executable
 		○ Or run from a python distribution (e.g.  python main.py)
@@ -7,14 +7,15 @@ How to run Single Atom Image Analysis (SAIA):
 		○ 'Yes' will start the directory watcher to process file creation events from a directory.
 		○ 'No' starts up the program without the directory watcher (it can be initiated later)
 Image storage path	Where SAIA will save images to (in subdirectories by date)
-Log file path	Where SAIA will save log files to (in subdirectories by date, collects histogram statistics)
+Log file path		Where SAIA will save log files to (in subdirectories by date, collects histogram statistics)
 Dexter sync file	Absolute path to the file where Dexter stores the current file number
-Image read path	Absolute path to the folder where Andor will save new image files to (note that no other file creation events should occur in this folder, or they will be processed by the directory watcher as well)
-Results path	The default location to open the file browser for saving csv files
+Image read path		Absolute path to the folder where Andor will save new image files to (note that no other file creation events should occur in this folder, or they will be processed by the directory watcher as well)
+Results path		The default location to open the file browser for saving csv files
 	
 	• Note that the image size in pixels must be set before any images are processed. 
 		○ If the image size is known, type it into the 'Image size in pixels:' text edit
 		○ The image size can also be taken from an image file by clicking 'Load size from image'
+		○ The 'Get ROI from image' will set the image size and then centre the ROI on the pixel with maximum intensity
 		
 	• There are several running modes:
 		○ Directory watcher (real time processing of images straight after the file is saved to the image read path)
@@ -43,31 +44,34 @@ We want a program that will real-time readout the integrated counts from the ima
 
 Results structure
 	• An image is processed by saving a copy to the image storage path then calculating:
-File #	Taken from currentfile.txt
+File #				Taken from currentfile.txt
 Integrated counts in ROI	User sets ROI, sum the counts in all of the pixels
-Atom detected	Counts // threshold. This is greater than zero if an atom is detected
-Max count	Search for the maximum value in the loaded image array
-xc	x-position of max count (in pixels)
-yc	y-position of max count (in pixels)
-Mean count	Take the mean of the image outside of the ROI to estimate background
-Standard deviation	Take the standard deviation of the image outside of the ROI
+Atom detected			Counts // threshold. This is greater than zero if an atom is detected
+Max count			Search for the maximum value in the loaded image array
+xc				x-position of max count (in pixels)
+yc				y-position of max count (in pixels)
+Mean count			Take the mean of the image outside of the ROI to estimate background
+Standard deviation		Take the standard deviation of the image outside of the ROI
 The integrated count is added to the current histogram and the rest of the information is stored in an array
 These are also the column headings when the histogram is saved.
 	
 	• The histogram statistics are analysed and displayed in the 'Histogram Statistics', they will be appended to a log file when the histogram csv is saved. The log file contains the following columns:
-Histogram # 	Increments by one every time a line is appended to the log file
-Variable	Variable set by the user, must be a float
-Loading probability	Ratio of images with counts above threshold to total images processed
-Background peak count	Calculated position of the background peak in counts
-Background peak width	Calculated width of the background peak in counts
-Signal peak count	Calculated position of the atom peak in counts
-Signal peak width	Calculated width of the atom peak in counts
-Separation	Signal peak count - background peak count
-Threshold	Mean of background and signal peak counts
+Histogram # 			Increments by one every time a line is appended to the log file
+Variable			Variable set by the user, must be a float
+Loading probability		Ratio of images with counts above threshold to total images processed
+Error in loading probability	The statistical confidence in the loading probability from the binomial distribution
+Background peak count		Calculated position of the background peak in counts
+Background peak width		Calculated width of the background peak in counts
+Signal peak count		Calculated position of the atom peak in counts
+Signal peak width		Calculated width of the atom peak in counts
+Fidelity			The probability of correctly identifying atom presence
+Error in fidelity		The range of possible fidelities based on peak position uncertainty
+Separation			Signal peak count - background peak count
+Threshold			Mean of background and signal peak counts
 Images processed	Number of images processed in the current histogram
 
 	• Each time a line is appended to the log file, the data will also be added to arrays which can be accessed in the 'Plotting' tab.
-The 'Plotting' can display any of the variables that are stored in the log file. 
+This happens when a histogram is saved, or when the 'Add to plot' button is pressed. 
 	
 Peak calculations
 There are several different ways to estimate the background and signal peak centres and widths and therefore calculate the threshold:
@@ -76,11 +80,13 @@ There are several different ways to estimate the background and signal peak cent
 	3) Use a threshold to split the histogram into background and single atom peaks, then fit Gaussian curves to get the mean and standard deviation.
 
 
+	• Any of the plots can be saved by right clicking on the plot area and selecting 'Export…'
+Under 'Item to export' make sure to select 'Entire Scene', otherwise it will not save.
+
+
 Settings Tab
 
 Histogram Tab
-Any of the plots can be saved by right clicking on the plot area and selecting 'Export…'
-Under 'Item to export' make sure to select 'Entire Scene', otherwise it will not save.
 
 Histogram Statistics Tab
 
@@ -88,8 +94,9 @@ Image Tab
 
 Plotting Tab
 
+-----------------------------------------------------------------------------------
+Possible Architectures:
 
-Possible Architectures
 Original method:
 	Experiment run by Dexter in loop -> Andor running in loop receives trigger (saves images) -> Python runs a loop checking for file changes -> python processes the new file, then plots a histogram
 	Needs several threads to run in parallel – a directory watcher to notice created files, and a graph plotter to process the data. Working version using pyqt

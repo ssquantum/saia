@@ -693,8 +693,8 @@ class main_window(QMainWindow):
         if self.image_handler.im_num > 0: # only update if a histogram exists
             oldthresh = self.image_handler.thresh # store the last value
             diff = 1                              # convergence criterion
-            for i in range(10):          # shouldn't need many iterations
-                if diff < 0.01:
+            for i in range(20):          # shouldn't need many iterations
+                if diff < 0.001:
                     break
                 new_stats = self.fit_gaussians()
                 diff = abs(oldthresh - self.image_handler.thresh) / float(oldthresh)
