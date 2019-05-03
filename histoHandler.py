@@ -12,11 +12,15 @@ class histo_handler:
     signal count, signal width, separation, threshold, images processed
     """
     def __init__(self):
-        self.headers = ['User variable', 'Number of images processed', 
+        self.headers = np.array(['User variable', 'Number of images processed', 
             'Loading probability', 'Error in loading probability',
             'Background peak count', 'Background peak width', 
             'Signal peak count', 'Signal peak width', 'Separation', 
-            'Fidelity', 'Error in fidelity', 'Threshold']
-        self.vals     = [] # the variables are in the columns - [:,i]
+            'Fidelity', 'Error in fidelity', 'Threshold'])
+        self.vals     = np.array([]) # the variables are in the columns - [:,i]
         self.xvals    = [] # variables to plot on the x axis
         self.yvals    = [] # variables to plot on the y axis
+
+    def load_from_log(self, fname):
+        """load data from a log file"""
+        self.vals = np.loadtxt(fname, skiprows=3, delimiter=',')

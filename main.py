@@ -32,12 +32,12 @@ try:
     from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QIntValidator, QComboBox, QMenu, QActionGroup, 
-            QTabWidget, QVBoxLayout) 
+            QTabWidget, QVBoxLayout, QFont) 
 except ModuleNotFoundError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent
     from PyQt5.QtGui import (QGridLayout, QMessageBox, QLineEdit, QIcon, 
             QFileDialog, QDoubleValidator, QIntValidator, QComboBox, QMenu, 
-            QActionGroup, QVBoxLayout)
+            QActionGroup, QVBoxLayout, QFont)
     from PyQt5.QtWidgets import (QApplication, QPushButton, QWidget, QTabWidget,
         QAction, QMainWindow, QLabel)
           
@@ -102,13 +102,17 @@ class main_window(QMainWindow):
         double_validator = QDoubleValidator()
         int_validator = QIntValidator()
 
+        # change font size
+        font = QFont()
+        font.setPixelSize(12)
+
         #### menubar at top gives options ####
         menubar = self.menuBar()
+
         # file menubar allows you to save/load data
         file_menu = menubar.addMenu('File')
         load_im = QAction('Load Image', self) # display a loaded image
         load_im.triggered.connect(self.load_image)
-        
         file_menu.addAction(load_im)
         
         # histogram menu saves/loads/resets histogram and gives binning options
@@ -143,6 +147,13 @@ class main_window(QMainWindow):
         bin_options.setExclusive(True) # only one option checked at a time
         bin_options.triggered.connect(self.set_bins) # connect the signal
         hist_menu.addMenu(bin_menu)
+
+        # load plots from log files
+        varplot_menu = menubar.addMenu('Plotting')
+
+        load_varplot = QAction('Load from log file', self)
+        load_varplot.triggered.connect(self.load_from_log)
+        varplot_menu.addAction(load_varplot)
 
         #### tab for settings  ####
         settings_tab = QWidget()
@@ -234,6 +245,8 @@ class main_window(QMainWindow):
 
         # main subplot of histogram
         self.hist_canvas = pg.PlotWidget()
+        self.hist_canvas.getAxis('bottom').tickFont = font
+        self.hist_canvas.getAxis('left').tickFont = font
         self.hist_canvas.setTitle("Histogram of CCD counts")
         hist_grid.addWidget(self.hist_canvas, 1,0, 6,8)  # allocate space in the grid
         
@@ -289,7 +302,7 @@ class main_window(QMainWindow):
 
         self.stat_labels = {}  # dictionary of stat labels
         # get the list of labels from the histogram handler
-        label_text = ['Counts above : below threshold'] + self.histo_handler.headers[1:]
+        label_text = ['Counts above : below threshold'] + list(self.histo_handler.headers[1:])
         for i in range(1, 1+len(label_text)):
             new_label = QLabel(label_text[i-1], self) # description
             stat_grid.addWidget(new_label, i,0, 1,1)
@@ -369,8 +382,10 @@ class main_window(QMainWindow):
 
         # main plot
         self.varplot_canvas = pg.PlotWidget()
+        self.varplot_canvas.getAxis('bottom').tickFont = font
+        self.varplot_canvas.getAxis('left').tickFont = font
         plot_grid.addWidget(self.varplot_canvas, 0,1, 6,8)
-
+        
         # x and y labels
         self.plot_labels = [QComboBox(self), QComboBox(self)]
         for i in range(len(self.plot_labels)):
@@ -707,16 +722,26 @@ class main_window(QMainWindow):
         The variables are read from the x and y axis QComboBoxes
         Then the plot is updated"""
         if np.size(self.histo_handler.vals) > 0:
-            xi = np.where(np.array(self.histo_handler.headers) == str(self.plot_labels[0].currentText()))[0][0]
-            self.histo_handler.xvals = np.array(self.histo_handler.vals)[:, xi+1] # set x values
+            xi = np.where(self.histo_handler.headers == str(self.plot_labels[0].currentText()))[0][0]
+            self.histo_handler.xvals = self.histo_handler.vals[:, xi+1] # set x values
             
-            yi = np.where(np.array(self.histo_handler.headers) == str(self.plot_labels[1].currentText()))[0][0]
-            self.histo_handler.yvals = np.array(self.histo_handler.vals)[:, yi+1] # set y values
+            y_label = str(self.plot_labels[1].currentText())
+            yi = np.where(self.histo_handler.headers == y_label)[0][0]
+            self.histo_handler.yvals = self.histo_handler.vals[:, yi+1] # set y values
 
             self.varplot_canvas.clear()  # remove previous data
             try:
                 self.varplot_canvas.plot(self.histo_handler.xvals, self.histo_handler.yvals, 
                                             pen=None, symbol='o')
+                # add error bars if available:
+                if 'Loading probability'in y_label or 'Fidelity' in y_label:
+                    # add widget for errorbars
+                    err_bars = pg.ErrorBarItem(x=self.histo_handler.xvals, 
+                                          y=self.hist_handler.yvals, 
+                                          height=self.histo_handler.vals[:,yi+2],
+                                          beam=0.5)
+                    print('tried!!')
+                    self.varplot_canvas.addItem(err_bars)
             except Exception: pass # probably wrong length of arrays
 
     def clear_varplot(self):
@@ -861,8 +886,9 @@ class main_window(QMainWindow):
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
         if not any([s == '' for s in stats]): # only add stats if the fit is successful
             # append current statistics to the histogram handler's list
-            self.histo_handler.vals.append(
-                    np.concatenate(([float(self.var_edit.text())], list(map(float, stats)))))
+            self.hist_handler.vals = np.append(self.histo_handler.vals,
+                    [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
+                    axis=0)
             self.update_varplot_axes()  # update the plot with the new values
     
             hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
@@ -882,7 +908,7 @@ class main_window(QMainWindow):
         The labels are: 'Counts above : below threshold', 'Number of images processed', 
         'Loading probability', 'Error in loading probability', Background peak count', 'Background peak width', 
         'Signal peak count', 'Signal peak width', 'Separation', 'Fidelity', 'Error in fidelity', 'Threshold'"""
-        for i, label in enumerate(['Counts above : below threshold']+self.histo_handler.headers[1:]):
+        for i, label in enumerate(['Counts above : below threshold']+list(self.histo_handler.headers[1:])):
             self.stat_labels[label].setText(args[i])
 
 
@@ -892,7 +918,7 @@ class main_window(QMainWindow):
         user variable, images processed, loading probability, error in loading probability, 
         bg count, bg width, signal count, signal width, separation, threshold"""
         stats = []
-        for label in ['Counts above : below threshold']+self.histo_handler.headers[1:]:
+        for label in ['Counts above : below threshold']+list(self.histo_handler.headers[1:]):
             stats.append(self.stat_labels[label].text())
 
         if 'Peak calculation failed' in stats[3]:
@@ -906,13 +932,16 @@ class main_window(QMainWindow):
         default path when a file browser is opened.
         default_path: set the default path if the directory watcher isn't running
         option: 'hist' takes the results path where histograms are stored
-                'im' takes the image storage path for loading images"""
+                'im' takes the image storage path for loading images
+                'log' take the path where log files are saved"""
         date = time.strftime("%Y %B %d", time.localtime()).split(" ") # day, long month, year
         
         if self.dir_watcher and option=='hist':    # make results path the default
             default_path = self.dir_watcher.results_path + r'\%s\%s\%s'%(date[0], date[1], date[2]) 
         elif self.dir_watcher and option=='im':
             default_path = self.dir_watcher.image_storage_path
+        elif option=='log':
+            default_path = os.path.dirname(self.log_file_name)
         
         return default_path
 
@@ -1079,6 +1108,23 @@ class main_window(QMainWindow):
 
         except OSError:
             pass # user cancelled - file not found
+
+    def load_from_log(self, trigger=None):
+        """Prompt the user to select the log file then pass it to the histohandler"""
+        default_path = self.get_default_path(option='log')
+        
+        try:
+            # the implementation of QFileDialog changed...
+            if 'PyQt4' in sys.modules: 
+                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
+            elif 'PyQt5' in sys.modules:
+                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
+            self.histo_handler.load_from_log(file_name)
+            self.update_varplot_axes()
+
+        except OSError:
+            pass # user cancelled - file not found
+
 
     #### #### testing functions #### #### 
         
