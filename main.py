@@ -53,8 +53,9 @@ class main_window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.dir_watcher = None  # a button will initiate the dir watcher
-        self.image_handler = ih.image_handler() # class to process images
-        self.histo_handler = hh.histo_handler() # class to process histograms
+        self.image_handler = [ih.image_handler(), ih.image_handler()] # class to process images
+        self.histo_handler = [hh.histo_handler(), hh.histo_handler()] # class to process histograms
+        self.atomX = ['Cs ', 'Rb ']   # term labels for atoms
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
@@ -78,14 +79,16 @@ class main_window(QMainWindow):
             os.makedirs(log_file_dir, exist_ok=True)
 
         # log is saved in a dated subdirectory and the file name also has the date
-        self.log_file_name = os.path.join(log_file_dir, 
-                   'log'+self.date[0]+self.date[1]+self.date[3]+'.dat')  
+        # make a separate log file for each atomic species:
+        self.log_file_names = [os.path.join(log_file_dir, 
+                   X+self.date[0]+self.date[1]+self.date[3]+'.dat')  for X in self.atomX]
         # write the header to the log file
-        if not os.path.isfile(self.log_file_name): # don't overwrite if it already exists
-            with open(self.log_file_name, 'w+') as f:
-                f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
-                f.write('include --[]\n')
-                f.write('Histogram, '+', '.join(self.histo_handler.headers)+'\n')
+        for file_name in self.log_file_names:
+            if not os.path.isfile(file_name): # don't overwrite if it already exists
+                with open(file_name, 'w+') as f:
+                    f.write('//Single Atom Image Analyser Log File: collects histogram data\n')
+                    f.write('include --[]\n')
+                    f.write('Histogram, '+', '.join(self.histo_handler[0].headers)+'\n')
        
 
     def init_UI(self):
@@ -148,12 +151,26 @@ class main_window(QMainWindow):
         bin_options.triggered.connect(self.set_bins) # connect the signal
         hist_menu.addMenu(bin_menu)
 
+        # toggle whether to fix threshold at user specified value
+        self.thresh_toggle = QAction('User Threshold', self, checkable=True)
+        self.thresh_toggle.triggered.connect(self.set_thresh)
+        hist_menu.addAction(self.thresh_toggle)
+
         # load plots from log files
         varplot_menu = menubar.addMenu('Plotting')
-
-        load_varplot = QAction('Load from log file', self)
+        # load histogram data into varplot
+        load_varplot = QAction('Load from log file', self) 
         load_varplot.triggered.connect(self.load_from_log)
         varplot_menu.addAction(load_varplot)
+        # choose which atoms to plot
+        atom_menu = QMenu('Choose Species', self) # drop down menu for choosing atom
+        self.atom_varplot_toggles = {}
+        for X in self.atomX:
+            self.atom_varplot_toggles[X] = QAction(X, atom_menu, checkable=True,
+                    checked=True)
+            atom_menu.addAction(self.atom_varplot_toggles[X])
+            self.atom_varplot_toggles[X].triggered.connect(self.choose_atom)
+        varplot_menu.addMenu(atom_menu)
 
         #### tab for settings  ####
         settings_tab = QWidget()
@@ -166,9 +183,10 @@ class main_window(QMainWindow):
         settings_grid.addWidget(size_label, 0,0, 1,1)
         self.pic_size_edit = QLineEdit(self)
         settings_grid.addWidget(self.pic_size_edit, 0,1, 1,1)
-        self.pic_size_edit.setText(str(self.image_handler.pic_size)) # default
+        self.pic_size_edit.setText(str(self.image_handler[0].pic_size)) # default
         self.pic_size_edit.textChanged[str].connect(self.pic_size_text_edit)
         self.pic_size_edit.setValidator(double_validator)
+        self.pic_size_edit.resize(self.pic_size_edit.sizeHint())
 
         # get image size from loading an image
         load_im_size = QPushButton('Load size from image', self)
@@ -179,36 +197,23 @@ class main_window(QMainWindow):
         # get ROI centre from loading an image
         load_roi = QPushButton('Get ROI from image', self)
         load_roi.clicked.connect(self.load_roi) # load roi centre from image
-        load_roi.resize(load_im_size.sizeHint())
-        settings_grid.addWidget(load_roi, 1,2, 1,1)
+        load_roi.resize(load_roi.sizeHint())
+        settings_grid.addWidget(load_roi, 0,3, 1,1)
 
-        # get user to set ROI:
-        # centre of ROI x position
-        roi_xc_label = QLabel('ROI x_c: ', self)
-        settings_grid.addWidget(roi_xc_label, 1,0, 1,1)
-        self.roi_x_edit = QLineEdit(self)
-        settings_grid.addWidget(self.roi_x_edit, 1,1, 1,1)
-        self.roi_x_edit.setText('0')  # default
-        self.roi_x_edit.textEdited[str].connect(self.roi_text_edit)
-        self.roi_x_edit.setValidator(int_validator) # only numbers
-        
-        # centre of ROI y position
-        roi_yc_label = QLabel('ROI y_c: ', self)
-        settings_grid.addWidget(roi_yc_label, 2,0, 1,1)
-        self.roi_y_edit = QLineEdit(self)
-        settings_grid.addWidget(self.roi_y_edit, 2,1, 1,1)
-        self.roi_y_edit.setText('0')  # default
-        self.roi_y_edit.textEdited[str].connect(self.roi_text_edit)
-        self.roi_y_edit.setValidator(int_validator) # only numbers
-        
-        # ROI size
-        roi_l_label = QLabel('ROI size: ', self)
-        settings_grid.addWidget(roi_l_label, 3,0, 1,1)
-        self.roi_l_edit = QLineEdit(self)
-        settings_grid.addWidget(self.roi_l_edit, 3,1, 1,1)
-        self.roi_l_edit.setText('1')  # default
-        self.roi_l_edit.textEdited[str].connect(self.roi_text_edit)
-        self.roi_l_edit.setValidator(int_validator) # only numbers
+        # get user to set ROI for Cs and Rb
+        self.roi_edits = {} # make dictionary of QLineEdit 
+        self.roi_label_text = ['xc: ', 'yc: ', 'size: ']
+        for i, X in enumerate(self.atomX):
+            for ii in range(len(self.roi_label_text)):
+                text = X + self.roi_label_text[ii]  # text for the label identifies the QLineEdit
+                new_label = QLabel(text, self)
+                settings_grid.addWidget(new_label, i,2*ii, 1,1)
+                self.roi_edits[text] = QLineEdit(self)
+                settings_grid.addWidget(self.roi_edits[text], i,2*ii+1, 1,1)
+                self.roi_edits[text].setText(str(ii//2)) # default
+                self.roi_edits[text].textEdited[str].connect(self.roi_text_edit)
+                self.roi_edits[text].setValidator(int_validator) # only numbers
+
         
         # change paths used for directory watcher
         path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
@@ -244,47 +249,27 @@ class main_window(QMainWindow):
         self.tabs.addTab(hist_tab, "Histogram")
 
         # main subplot of histogram
-        self.hist_canvas = pg.PlotWidget()
-        self.hist_canvas.getAxis('bottom').tickFont = font
-        self.hist_canvas.getAxis('left').tickFont = font
-        self.hist_canvas.setTitle("Histogram of CCD counts")
-        hist_grid.addWidget(self.hist_canvas, 1,0, 6,8)  # allocate space in the grid
+        self.hist_canvas = [pg.PlotWidget(), pg.PlotWidget()]
+        for i in range(len(self.hist_canvas)):
+            self.hist_canvas[i].getAxis('bottom').tickFont = font
+            self.hist_canvas[i].getAxis('left').tickFont = font # not doing anything...
+        self.hist_canvas[0].setTitle("Histogram of CCD counts")
+        hist_grid.addWidget(self.hist_canvas[0], 1,0, 5,8)  # allocate space in the grid
+        hist_grid.addWidget(self.hist_canvas[1], 7,0, 5,8)
         
         # adjustable parameters: min/max counts, number of bins
-        # min counts:
-        min_counts_label = QLabel('Min. Counts: ', self)
-        hist_grid.addWidget(min_counts_label, 0,0, 1,1)
-        self.min_counts_edit = QLineEdit(self)
-        hist_grid.addWidget(self.min_counts_edit, 0,1, 1,1)
-        self.min_counts_edit.textChanged[str].connect(self.bins_text_edit)
-        self.min_counts_edit.setValidator(double_validator)
-        
-        # max counts:
-        max_counts_label = QLabel('Max. Counts: ', self)
-        hist_grid.addWidget(max_counts_label, 0,2, 1,1)
-        self.max_counts_edit = QLineEdit(self)
-        hist_grid.addWidget(self.max_counts_edit, 0,3, 1,1)
-        self.max_counts_edit.textChanged[str].connect(self.bins_text_edit)
-        self.max_counts_edit.setValidator(double_validator)
-        
-        # number of bins
-        num_bins_label = QLabel('# Bins: ', self)
-        hist_grid.addWidget(num_bins_label, 0,4, 1,1)
-        self.num_bins_edit = QLineEdit(self)
-        hist_grid.addWidget(self.num_bins_edit, 0,5, 1,1)
-        self.num_bins_edit.textChanged[str].connect(self.bins_text_edit)
-        self.num_bins_edit.setValidator(double_validator)
+        self.hist_edits = {}
+        self.hist_label_text = ['Min. Counts: ', 'Max. Counts: ', '# Bins: ', 'Threshold: ']
+        for i, X in enumerate(self.atomX):
+            for ii in range(len(self.hist_label_text)):
+                text = X + self.hist_label_text[ii]
+                new_label = QLabel(text, self)
+                hist_grid.addWidget(new_label, i*6,2*ii, 1,1)
+                self.hist_edits[text] = QLineEdit(self)
+                hist_grid.addWidget(self.hist_edits[text], i*6,2*ii+1, 1,1)
+                self.hist_edits[text].textChanged[str].connect(self.bins_text_edit)
+                self.hist_edits[text].setValidator(double_validator)
 
-        # user can set the threshold
-        self.thresh_toggle = QPushButton('User Threshold: ', self)
-        self.thresh_toggle.setCheckable(True)
-        self.thresh_toggle.clicked[bool].connect(self.set_thresh)
-        hist_grid.addWidget(self.thresh_toggle, 0,6, 1,1)
-        # user inputs threshold
-        self.thresh_edit = QLineEdit(self)
-        hist_grid.addWidget(self.thresh_edit, 0,7, 1,1)
-        self.thresh_edit.textChanged[str].connect(self.bins_text_edit)
-        self.thresh_edit.setValidator(double_validator)
         
         #### tab for current histogram statistics ####
         stat_tab = QWidget()
@@ -302,27 +287,29 @@ class main_window(QMainWindow):
 
         self.stat_labels = {}  # dictionary of stat labels
         # get the list of labels from the histogram handler
-        label_text = ['Counts above : below threshold'] + list(self.histo_handler.headers[1:])
-        for i in range(1, 1+len(label_text)):
-            new_label = QLabel(label_text[i-1], self) # description
-            stat_grid.addWidget(new_label, i,0, 1,1)
-            self.stat_labels[label_text[i-1]] = QLabel('', self) # value
-            stat_grid.addWidget(self.stat_labels[label_text[i-1]], i,1, 1,1)
+        label_text = ['Counts above : below threshold'] + list(self.histo_handler[0].headers[1:])
+        for i, X in enumerate(self.atomX):
+            for ii in range(1, 1+len(label_text)):
+                text = X + label_text[ii-1]
+                new_label = QLabel(text, self) # description
+                stat_grid.addWidget(new_label, ii,0, 1,1)
+                self.stat_labels[text] = QLabel('', self) # value
+                stat_grid.addWidget(self.stat_labels[text], ii,i+1, 1,1)
             
         # update statistics
         stat_update = QPushButton('Update statistics', self)
         stat_update.clicked[bool].connect(self.update_stats)
-        stat_grid.addWidget(stat_update, i+1,0, 1,1)
+        stat_grid.addWidget(stat_update, ii+1,0, 1,1)
 
         # do Gaussian/Poissonian fit - peaks and widths
-        fit_update = QPushButton('Get best fit', self)
+        fit_update = QPushButton('Get best fits', self)
         fit_update.clicked[bool].connect(self.update_fit)
-        stat_grid.addWidget(fit_update, i+1,1, 1,1)
+        stat_grid.addWidget(fit_update, ii+1,1, 1,1)
 
         # quickly add the current histogram statistics to the plot
         add_to_plot = QPushButton('Add to plot', self)
         add_to_plot.clicked[bool].connect(self.add_stats_to_plot)
-        stat_grid.addWidget(add_to_plot, i+1,2, 1,1)
+        stat_grid.addWidget(add_to_plot, ii+1,2, 1,1)
 
         #### tab for viewing images ####
         im_tab = QWidget()
@@ -334,7 +321,7 @@ class main_window(QMainWindow):
         im_grid.addWidget(im_size_label, 0,0, 1,1)
         self.pic_size_label = QLabel('', self)
         im_grid.addWidget(self.pic_size_label, 0,1, 1,1)
-        self.pic_size_label.setText(str(self.image_handler.pic_size)) # default
+        self.pic_size_label.setText(str(self.image_handler[0].pic_size)) # default
 
         # toggle to continuously plot images as they come in
         self.im_show_toggle = QPushButton('Auto-display last image', self)
@@ -342,31 +329,31 @@ class main_window(QMainWindow):
         self.im_show_toggle.clicked[bool].connect(self.set_im_show)
         im_grid.addWidget(self.im_show_toggle, 0,2, 1,1)
         
-        im_grid_pos = 0 # starting column. 
         # centre of ROI x position
-        self.xc_label = QLabel('ROI x_c: 0', self)
-        im_grid.addWidget(self.xc_label, 7,im_grid_pos, 1,1)
-        
-        # centre of ROI y position
-        self.yc_label = QLabel('ROI y_c: 0', self)
-        im_grid.addWidget(self.yc_label, 7,im_grid_pos+2, 1,1)
-        
-        # ROI size
-        self.l_label = QLabel('ROI size: 1', self)
-        im_grid.addWidget(self.l_label, 7,im_grid_pos+4, 1,1)
-        
+        im_grid_pos = 0 # starting column. 
+        self.roi_labels = {}
+        for i, X in enumerate(self.atomX):
+            for ii in range(len(self.roi_label_text)):
+                text = X + self.roi_label_text[ii]
+                self.roi_labels[text] = QLabel(text+str(ii//2), self)
+                im_grid.addWidget(self.roi_labels[text], 7+i,im_grid_pos, 1,1)
+                im_grid_pos += 2
+
         # display last image if toggle is True
         im_widget = pg.GraphicsLayoutWidget() # containing widget
         viewbox = im_widget.addViewBox() # plot area to display image
         self.im_canvas = pg.ImageItem() # the image
         viewbox.addItem(self.im_canvas)
         im_grid.addWidget(im_widget, 1,im_grid_pos, 6,8)
-        # make an ROI that the user can drag
-        self.roi = pg.ROI([0,0], [1,1]) 
-        self.roi.addScaleHandle([1,1], [0.5,0.5]) # allow user to adjust ROI size
-        viewbox.addItem(self.roi)
-        self.roi.setZValue(10)   # make sure the ROI is drawn above the image
-        self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
+        # make a ROIs that the user can drag. One for Cs, one for Rb
+        self.rois = np.array([pg.ROI([0,0], [1,1], snapSize=1, scaleSnap=True, translateSnap=True, pen=(255,127,14)),
+                    pg.ROI([0,0], [1,1], snapSize=1, scaleSnap=True, translateSnap=True, pen=(31,119,180))])
+        for roi in self.rois:
+            roi.addScaleHandle([1,1], [0.5,0.5]) # allow user to adjust ROI size
+            viewbox.addItem(roi)
+            roi.setZValue(10)   # make sure the ROI is drawn above the image
+            roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
+
         # make a histogram to control the intensity scaling
         self.im_hist = pg.HistogramLUTItem()
         self.im_hist.setImageItem(self.im_canvas)
@@ -389,7 +376,7 @@ class main_window(QMainWindow):
         # x and y labels
         self.plot_labels = [QComboBox(self), QComboBox(self)]
         for i in range(len(self.plot_labels)):
-            self.plot_labels[i].addItems(self.histo_handler.headers) # add options
+            self.plot_labels[i].addItems(self.histo_handler[0].headers) # add options
             # connect buttons to update functions
             self.plot_labels[i].activated[str].connect(self.update_varplot_axes)
         # position labels in grid
@@ -517,70 +504,88 @@ class main_window(QMainWindow):
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""
-        x0, y0 = self.roi.pos()  # lower left corner of bounding rectangle
-        xw, yw = self.roi.size() # widths
+        # find which ROI was changed
+        roi = self.rois[self.rois == self.sender()]
+        x0, y0 = roi.pos()  # lower left corner of bounding rectangle
+        xw, yw = roi.size() # widths
         l = int(0.5*(xw+yw))  # want a square ROI
         # note: setting the origin as bottom left but the image has origin top left
         xc, yc = int(x0 + l//2), int(y0 + l//2)  # centre
-        self.image_handler.set_roi(dimensions=[xc, yc, l])
-        self.xc_label.setText('ROI x_c = '+str(xc)) 
-        self.yc_label.setText('ROI y_c = '+str(yc))
-        self.l_label.setText('ROI size = '+str(l))
-        self.roi_x_edit.setText(str(xc))
-        self.roi_y_edit.setText(str(yc))
-        self.roi_l_edit.setText(str(l))
+        roi_idx = np.where(self.rois == self.sender())[0][0]  # index of which roi we changed
+        new_dim = [xc, yc, l]  # new dimensions for ROI
+        self.image_handler[roi_idx].set_roi(dimensions=new_dim)
+        for i in range(new_dim):
+            text = self.atomX[roi_idx] + self.roi_label_text[i]
+            self.roi_labels[text].setText(text + str(new_dim[i]))
+            self.roi_edits[text].setText(str(new_dim[i]))
             
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
         edits the text in the line edit widget"""
-        self.image_handler.pic_size = int(text)
-        self.pic_size_label.setText(str(self.image_handler.pic_size))
+        for i in range(len(self.image_handler)):
+            self.image_handler[i].pic_size = int(text)
+            self.pic_size_label.setText(str(self.image_handler[i].pic_size))
+
+    def get_atom_idx(self, dict_items, sender):
+        """Find the index of the atom term symbols list where the sender object
+        matches an item in the dictionary"""
+        for key, item in dict_items:
+            if item == sender:
+                return np.where([X == key[:3] for X in self.atomX])[0][0], key
         
     def roi_text_edit(self, text):
         """Update the ROI position and size every time a text edit is made by
         the user to one of the line edit widgets"""
-        xc, yc, l = [self.roi_x_edit.text(),
-                            self.roi_y_edit.text(), self.roi_l_edit.text()]
-        if any([v == '' for v in [xc, yc, l]]):
-            xc, yc, l = 0, 0, 1 # default takes the top left pixel
+        # find which ROI edit was changed
+        roi_idx, roi_key = self.get_atom_idx(self.roi_edits.items(), self.sender())
+        
+        # [xc, yc, l]
+        new_dim = [self.roi_edits[self.atomX[roi_idx]+dim].text() for dim in self.roi_label_text]
+        
+        if any([v == '' for v in new_dim]):
+            new_dim = [0, 0, 1] # default takes the top left pixel
         else:
-            xc, yc, l = list(map(int, [xc, yc, l])) # crashes if the user inputs float
+            new_dim = list(map(int, new_dim)) # crashes if the user inputs float
         
-        if (xc - l//2 < 0 or yc - l//2 < 0 
-            or xc + l//2 > self.image_handler.pic_size 
-            or yc + l//2 > self.image_handler.pic_size):
-            l = 2*min([xc, yc])  # can't have the boundary go off the edge
-        if int(l) == 0:
-            l = 1 # can't have zero width
+        if (new_dim[0] - new_dim[2]//2 < 0 or new_dim[1] - new_dim[2]//2 < 0 
+            or new_dim[0] + new_dim[2]//2 > self.image_handler[roi_idx].pic_size 
+            or new_dim[1] + new_dim[2]//2 > self.image_handler[roi_idx].pic_size):
+            new_dim[2] = 2*min([new_dim[0], new_dim[1]])  # can't have the boundary go off the edge
+        if int(new_dim[2]) == 0:
+            new_dim[2] = 1 # can't have zero width
         
-        self.image_handler.set_roi(dimensions=list(map(int, [xc, yc, l])))
-        self.xc_label.setText('ROI x_c = '+str(xc)) 
-        self.yc_label.setText('ROI y_c = '+str(yc))
-        self.l_label.setText('ROI size = '+str(l))
+        self.image_handler[roi_idx].set_roi(dimensions=list(map(int, new_dim)))
+        for i in range(new_dim):
+            text = self.atomX[roi_idx] + self.roi_label_text[i]
+            self.roi_labels[text].setText(text + str(new_dim[i]))
         # update ROI on image canvas
         # note: setting the origin as top left because image is inverted
-        self.roi.setPos(xc - l//2, yc - l//2)
-        self.roi.setSize(l, l)
+        self.rois[roi_idx].setPos(new_dim[0] - new_dim[2]//2, new_dim[1] - new_dim[2]//2) # xc-l//2, yc-l//2
+        self.roi[roi_idx].setSize(new_dim[2], new_dim[2]) # l, l
         
         
     def bins_text_edit(self, text):
         """Update the histogram bins every time a text edit is made by the user
         to one of the line edit widgets"""
         if self.bin_actions[1].isChecked(): # [auto, manual, no update]
-            new_vals = [self.min_counts_edit.text(),
-                            self.max_counts_edit.text(), self.num_bins_edit.text()]
+            # 0: Cs, 1: Rb
+            idx, key = self.get_atom_idx(self.hist_edits.items(), self.sender())
+            # min counts, max counts, # bins
+            new_vals = [self.hist_edits[key[:3]+self.hist_label_text[0]].text(),
+                        self.hist_edits[key[:3]+self.hist_label_text[1]].text(), 
+                        self.hist_edits[key[:3]+self.hist_label_text[2]].text()]
                             
             # if the line edit widget is empty, take an estimate from histogram values
-            if new_vals[0] == '' and self.image_handler.im_num > 0:
-                new_vals[0] = min(self.image_handler.counts[:self.image_handler.im_num])
-            if new_vals[1] == '' and self.image_handler.im_num > 0:
-                new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
+            if new_vals[0] == '' and self.image_handler[idx].im_num > 0:
+                new_vals[0] = min(self.image_handler[idx].counts[:self.image_handler[idx].im_num])
+            if new_vals[1] == '' and self.image_handler[idx].im_num > 0:
+                new_vals[1] = max(self.image_handler[idx].counts[:self.image_handler[idx].im_num])
             elif not any([v == '' for v in new_vals[:2]]) and int(new_vals[1]) < int(new_vals[0]):
                 # can't have max < min
-                new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
-            if new_vals[2] == '' and self.image_handler.im_num > 0:
-                new_vals[2] = 20 + self.image_handler.im_num // 20
-            if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
+                new_vals[1] = max(self.image_handler[idx].counts[:self.image_handler[idx].im_num])
+            if new_vals[2] == '' and self.image_handler[idx].im_num > 0:
+                new_vals[2] = 20 + self.image_handler[idx].im_num // 20
+            if any([v == '' for v in new_vals]) and self.image_handler[idx].im_num == 0:
                 new_vals = [0, 1, 10]
             if int(new_vals[2]) < 2:
                 # 0 bins causes value error
@@ -588,169 +593,147 @@ class main_window(QMainWindow):
             min_bin, max_bin, num_bins = list(map(int, new_vals))
             
             # set the new values for the bins of the image handler
-            self.image_handler.bin_array = np.linspace(min_bin, max_bin, num_bins)
+            self.image_handler[idx].bin_array = np.linspace(min_bin, max_bin, num_bins)
 
             # set the new threshold if supplied
             if self.thresh_toggle.isChecked():
                 try:
-                    self.image_handler.thresh = float(self.thresh_edit.text())
-                    self.stat_labels['Threshold'].setText(str(int(self.image_handler.thresh)))
+                    # get threshold from QLineEdit
+                    self.image_handler[idx].thresh = float(
+                            self.hist_edits[key[:3]+self.hist_label_text[3]].text())
+                    # show the new threshold in the label
+                    self.stat_labels[key[:3]+self.hist_label_text[3]].setText(
+                            str(int(self.image_handler[idx].thresh)))
                 except ValueError: pass # user switched toggle before inputing text
-                self.plot_current_hist(self.image_handler.histogram) # doesn't update thresh
+                self.plot_current_hist([x.histogram for x in self.image_handler]) # doesn't update thresh
             else:
-                self.plot_current_hist(self.image_handler.hist_and_thresh) # updates thresh
+                self.plot_current_hist([x.hist_and_thresh for x in self.image_handler]) # updates thresh
             
     
     #### #### toggle functions #### #### 
 
     def update_stats(self, toggle=True):
-        """Update the statistics from the current histogram
+        """Update the statistics from the current histograms
         image_handler uses a peak finding algorithm to get the peak positions and widths
         from these a threshold can be set. If the user thresh_toggle is checked then the
         threshold will not be updated."""
-        if self.image_handler.im_num > 0: # only update if a histogram exists
-            if self.thresh_toggle.isChecked(): # using manual threshold
-                self.plot_current_hist(self.image_handler.histogram) # update hist and peak stats, keep thresh
+        new_stats = []
+        for im_han in self.image_handler:
+            if im_han.im_num > 0: # only update if a histogram exists
+                if self.thresh_toggle.isChecked(): # using manual threshold
+                    self.plot_current_hist(im_han.histogram) # update hist and peak stats, keep thresh
+                else:
+                    self.plot_current_hist(im_han.hist_and_thresh) # update hist and get peak stats
+
+
+                atom_count = np.size(np.where(im_han.atom > 0)[0])  # images with counts above threshold
+                empty_count = np.size(np.where(im_han.atom[:im_han.im_num] == 0)[0])
+                loading_prob = np.around(atom_count/im_han.im_num, 4)
+                # use the binomial distribution to get 1 sigma confidence intervals:
+                conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
+                loading_err = np.around(conf[1] - conf[0], 4)
+
+                peak_stats = [0]*7  # values if calculation fails
+                if np.size(im_han.peak_counts) == 2:
+                    peak_stats[0] = int(im_han.peak_counts[0]) # background position
+                    peak_stats[1] = int(im_han.peak_widths[0]) # background width
+                    peak_stats[2] = int(im_han.peak_counts[1]) # signal position
+                    peak_stats[3] = int(im_han.peak_widths[1]) # signal width
+                    peak_stats[4] = int(im_han.peak_counts[1] - 
+                                            im_han.peak_counts[0]) # separation
+                    peak_stats[5] = im_han.fidelity            # fidelity
+                    peak_stats[6] = im_han.err_fidelity        # error in fidelity
+                # set text on labels:
+                # counts above:below threshold, images processed, loading probability, error in loading probability,
+                # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+                new_stats.append(([str(atom_count) + ' : ' + str(empty_count), str(im_han.im_num),
+                    str(loading_prob), str(loading_err)] + list(map(str, peak_stats)) + [str(int(im_han.thresh))]))
+
+                # user variable, images processed, loading probability, error in loading probability, 
+                # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+                # np.array([float(self.var_edit.text()), im_han.im_num, loading_prob, loading_err] 
+                #                     + peak_stats + [int(im_han.thresh)])
+        self.update_stat_labels(new_stats)
+        return new_stats
+
+    def fit_gaussians(self):
+        """Update the histograms and fit two Gaussians, splitting the data at the threshold
+        then use the fits to calculate histogram statistics, and set the threshold where the 
+        fidelity is maximum"""
+        results = []
+        for idx, im_han in enumerate(self.image_handler):
+            bins, occ, thresh = im_han.histogram()  # get histogram
+            bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
+            diff = abs(bins - thresh)   # minimum is at the threshold
+            thresh_i = np.argmin(diff)  # index of the threshold
+
+            # split the histogram at the threshold value
+            best_fits = [fc.fit(bins[:thresh_i]+bin_mid, occ[:thresh_i]),
+                            fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
+
+            for bf in best_fits:
+                try:
+                    bf.estGaussParam()         # get estimate of parameters
+                    # parameters are: amplitude, centre, e^2 width
+                    bf.getBestFit(bf.gauss)    # get best fit parameters
+                except: return 0               # fit failed, do nothing
+
+            # update image handler's values for peak parameters
+            im_han.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
+            im_han.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
+            # e^2 width = 2 * sigma
+            im_han.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))/2.
+
+            # update threshold to where fidelity is maximum
+            if not self.thresh_toggle.isChecked(): # update thresh if not set by user
+                im_han.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=100)
             else:
-                self.plot_current_hist(self.image_handler.hist_and_thresh) # update hist and get peak stats
+                im_han.fidelity, im_han.err_fidelity = np.around(
+                                im_han.get_fidelity(), 4) # round to 4 d.p.
 
+            self.plot_current_hist(im_han.histogram) # clear then update histogram plot
+            for bf in best_fits:
+                xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
+                self.hist_canvas[idx].plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
 
-            atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
-            empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
-            loading_prob = np.around(atom_count/self.image_handler.im_num, 4)
+            # update atom statistics
+            im_han.atom[:im_han.im_num] = im_han.counts[:im_han.im_num] // im_han.thresh   # update atom presence
+            atom_count = np.size(np.where(im_han.atom > 0)[0]) # images with counts above threshold
+            empty_count = np.size(np.where(im_han.atom[:im_han.im_num] == 0)[0]) # images with counts below threshold
+            loading_prob = np.around(atom_count/im_han.im_num, 4) # loading probability
             # use the binomial distribution to get 1 sigma confidence intervals:
             conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
             loading_err = np.around(conf[1] - conf[0], 4)
 
-            peak_stats = [0]*7  # values if calculation fails
-            if np.size(self.image_handler.peak_counts) == 2:
-                peak_stats[0] = int(self.image_handler.peak_counts[0]) # background position
-                peak_stats[1] = int(self.image_handler.peak_widths[0]) # background width
-                peak_stats[2] = int(self.image_handler.peak_counts[1]) # signal position
-                peak_stats[3] = int(self.image_handler.peak_widths[1]) # signal width
-                peak_stats[4] = int(self.image_handler.peak_counts[1] - 
-                                        self.image_handler.peak_counts[0]) # separation
-                peak_stats[5] = self.image_handler.fidelity            # fidelity
-                peak_stats[6] = self.image_handler.err_fidelity        # error in fidelity
-            # set text on labels:
-            # counts above:below threshold, images processed, loading probability, error in loading probability,
+            # counts above : below threshold, images processed, loading probability, error in loading probability, 
             # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
-            self.update_stat_labels([str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
-                str(loading_prob), str(loading_err)] + list(map(str, peak_stats)) + [str(int(self.image_handler.thresh))])
-
-            # user variable, images processed, loading probability, error in loading probability, 
-            # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
-            return np.array([float(self.var_edit.text()), self.image_handler.im_num, loading_prob, loading_err] 
-                                + peak_stats + [int(self.image_handler.thresh)])
-
-    def fit_gaussians(self):
-        """Update the histogram and fit two Gaussians, splitting the data at the threshold
-        then use the fits to calculate histogram statistics, and set the threshold where the 
-        fidelity is maximum"""
-        bins, occ, thresh = self.image_handler.histogram()  # get histogram
-        bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
-        diff = abs(bins - thresh)   # minimum is at the threshold
-        thresh_i = np.argmin(diff)  # index of the threshold
-
-        # split the histogram at the threshold value
-        best_fits = [fc.fit(bins[:thresh_i]+bin_mid, occ[:thresh_i]),
-                        fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
-
-        for bf in best_fits:
-            try:
-                bf.estGaussParam()         # get estimate of parameters
-                # parameters are: amplitude, centre, e^2 width
-                bf.getBestFit(bf.gauss)    # get best fit parameters
-            except: return 0               # fit failed, do nothing
-
-        # update image handler's values for peak parameters
-        self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
-        self.image_handler.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
-        # e^2 width = 2 * sigma
-        self.image_handler.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))/2.
-
-        # update threshold to where fidelity is maximum
-        if not self.thresh_toggle.isChecked(): # update thresh if not set by user
-            self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[1].ps[1], n=100)
-        else:
-            self.image_handler.fidelity, self.image_handler.err_fidelity = np.around(
-                            self.image_handler.get_fidelity(), 4) # round to 4 d.p.
-
-        self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
-        for bf in best_fits:
-            xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
-            self.hist_canvas.plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
-
-        # update atom statistics
-        self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
-            :self.image_handler.im_num] // self.image_handler.thresh   # update atom presence
-        atom_count = np.size(np.where(self.image_handler.atom > 0)[0]) # images with counts above threshold
-        empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0]) # images with counts below threshold
-        loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
-        # use the binomial distribution to get 1 sigma confidence intervals:
-        conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
-        loading_err = np.around(conf[1] - conf[0], 4)
-
-        # counts above : below threshold, images processed, loading probability, error in loading probability, 
-        # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
-        # note: Gaussian beam waist is 2x standard deviation
-        return [str(atom_count) + ' : ' + str(empty_count), str(self.image_handler.im_num),
-            str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
-            "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
-            best_fits[0].ps[1]), str(self.image_handler.fidelity), str(self.image_handler.err_fidelity),
-            str(int(self.image_handler.thresh))]
+            # note: Gaussian beam waist is 2x standard deviation
+            results.append([str(atom_count) + ' : ' + str(empty_count), str(im_han.im_num),
+                str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
+                "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
+                best_fits[0].ps[1]), str(im_han.fidelity), str(im_han.err_fidelity),
+                str(int(im_han.thresh))])
+        return results
 
     def update_fit(self, toggle=True):
         """Fit Gaussians to the peaks and use it to get a better estimate of the 
         peak centres and widths. The peaks are not quite Poissonian because of the
         bias from dark counts. Use the fits to get histogram statistics, then set 
         the threshold to maximise fidelity. Iterate until the threshold converges."""
-        if self.image_handler.im_num > 0: # only update if a histogram exists
-            oldthresh = self.image_handler.thresh # store the last value
-            diff = 1                              # convergence criterion
+        # only update if a histogram exists
+        if self.image_handler[0].im_num > 0 and self.image_handler[1].im_num > 0: 
+            # store the previous values
+            oldthresh = np.array([x.thresh for x in self.image_handler])
+            diff = np.ones(len(oldthresh))        # convergence criterion
             for i in range(20):          # shouldn't need many iterations
-                if diff < 0.001:
+                if any(diff < 0.001):
                     break
                 new_stats = self.fit_gaussians()
-                diff = abs(oldthresh - self.image_handler.thresh) / float(oldthresh)
+                diff = abs(oldthresh - np.array([x.thresh for x in self.image_handler])) / float(oldthresh)
 
             self.update_stat_labels(new_stats)
             
     
-    def update_varplot_axes(self, label=''):
-        """The user selects which variable they want to display on the plot
-        The variables are read from the x and y axis QComboBoxes
-        Then the plot is updated"""
-        if np.size(self.histo_handler.vals) > 0:
-            xi = np.where(self.histo_handler.headers == str(self.plot_labels[0].currentText()))[0][0]
-            self.histo_handler.xvals = self.histo_handler.vals[:, xi+1] # set x values
-            
-            y_label = str(self.plot_labels[1].currentText())
-            yi = np.where(self.histo_handler.headers == y_label)[0][0]
-            self.histo_handler.yvals = self.histo_handler.vals[:, yi+1] # set y values
-
-            self.varplot_canvas.clear()  # remove previous data
-            try:
-                self.varplot_canvas.plot(self.histo_handler.xvals, self.histo_handler.yvals, 
-                                            pen=None, symbol='o')
-                # add error bars if available:
-                if 'Loading probability'in y_label or 'Fidelity' in y_label:
-                    # add widget for errorbars
-                    err_bars = pg.ErrorBarItem(x=self.histo_handler.xvals, 
-                                          y=self.hist_handler.yvals, 
-                                          height=self.histo_handler.vals[:,yi+2],
-                                          beam=0.5)
-                    print('tried!!')
-                    self.varplot_canvas.addItem(err_bars)
-            except Exception: pass # probably wrong length of arrays
-
-    def clear_varplot(self):
-        """Clear the plot of histogram statistics by resetting the histo_handler.
-        The data is not lost since it has been appended to the log file."""
-        self.histo_handler.__init__ () # empty the stored arrays
-        self.varplot_canvas.clear()    # clear the displayed plot
-
-
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is
         kept constant using the image_handler.histogram() function. Otherwise,
@@ -809,9 +792,9 @@ class main_window(QMainWindow):
             self.swap_signals()  # disconnect image handler, reconnect plot
             self.image_handler.bin_array = []
             if self.thresh_toggle.isChecked():
-                self.plot_current_hist(self.image_handler.histogram)
+                self.plot_current_hist([x.histogram for x in self.image_handler])
             else:
-                self.plot_current_hist(self.image_handler.hist_and_thresh)
+                self.plot_current_hist([x.hist_and_thresh for x in self.image_handler])
 
         elif self.bin_actions[2].isChecked(): # no update
             try: # disconnect all slots
@@ -820,28 +803,32 @@ class main_window(QMainWindow):
             
             # just process the image and set the text of the most recent file
             if self.dir_watcher: # check that the dir watcher exists to prevent crash
-                self.dir_watcher.event_handler.event_path.connect(self.image_handler.process)
+                for im_han in self.image_handler:
+                    self.dir_watcher.event_handler.event_path.connect(im_han.process)
                 self.dir_watcher.event_handler.event_path.connect(self.recent_label.setText) # might need a better label
             
     #### #### canvas functions #### #### 
         
-    def plot_current_hist(self, hist_function):
-        """Reset the plot to show the current data stored in the image handler.
-        hist_function is used to make the histogram and allows the toggling of
+    def plot_current_hist(self, hist_functions):
+        """Reset the plots to show the current data stored in the image handler.
+        hist_functions is used to make the histogram and allows the toggling of
         different functions that may or may not update the threshold value."""
         # update the histogram and threshold estimate
-        bins, occ, thresh = hist_function()
-        
-        self.hist_canvas.clear()
-        self.hist_canvas.plot(bins, occ, stepMode=True, pen='k',
-                                fillLevel=0, brush = (220,220,220,220)) # histogram
-        self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen='r') # threshold line
+        for hf in hist_functions:
+            bins, occ, thresh = hf()
+            idx = np.where([x.histogram == hf or x.hist_and_thresh == hf
+                    for x in self.image_handler])[0][0]
+            
+            self.hist_canvas[idx].clear()
+            self.hist_canvas[idx].plot(bins, occ, stepMode=True, pen='k',
+                                    fillLevel=0, brush = (220,220,220,220)) # histogram
+            self.hist_canvas[idx].plot([thresh]*2, [0, max(occ)], pen='r') # threshold line
 
     
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
         display the image from the file in the image canvas"""
-        im_vals = self.image_handler.load_full_im(event_path)
+        im_vals = self.image_handler[0].load_full_im(event_path)
         self.im_canvas.setImage(im_vals)
         self.im_hist.setLevels(np.min(im_vals), np.max(im_vals))
         
@@ -852,14 +839,15 @@ class main_window(QMainWindow):
         the figure"""
         # add the count
         t1 = time.time()
-        self.image_handler.process(event_path)
+        for im_han in self.image_handler:
+            im_han.process(event_path)
         t2 = time.time()
         self.int_time = t2 - t1
         
         # display the name of the most recent file
         self.recent_label.setText('Just processed: '+os.path.basename(event_path))
         
-        self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
+        self.plot_current_hist([x.hist_and_thresh for x in self.image_handler]) # update the displayed plot
 
         self.plot_time = time.time() - t2
 
@@ -869,14 +857,15 @@ class main_window(QMainWindow):
         the figure but without changing the threshold value"""
         # add the count
         t1 = time.time()
-        self.image_handler.process(event_path)
+        for im_han in self.image_handler:
+            im_han.process(event_path)
         t2 = time.time()
         self.int_time = t2 - t1
         
         # display the name of the most recent file
         self.recent_label.setText('Just processed: '+os.path.basename(event_path))
         
-        self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
+        self.plot_current_hist([x.histogram for x in self.image_handler]) # update the displayed plot
         self.plot_time = time.time() - t2
 
     def add_stats_to_plot(self, toggle=True):
@@ -884,47 +873,97 @@ class main_window(QMainWindow):
         and add the values to the variable plot, saving the parameters to the log
         file at the same time. If any of the labels are empty, do nothing and return -1"""
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
-        if not any([s == '' for s in stats]): # only add stats if the fit is successful
-            # append current statistics to the histogram handler's list
-            self.hist_handler.vals = np.append(self.histo_handler.vals,
-                    [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
-                    axis=0)
-            self.update_varplot_axes()  # update the plot with the new values
-    
-            hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
-            # append histogram stats to log file:
-            with open(self.log_file_name, 'a') as f:
-                f.write(','.join([str(hist_num)] + stats) + '\n')
+        for i in range(len(stats)):
+            if not any([s == '' for s in stats[i]]): # only add stats if the fit is successful
+                # append current statistics to the histogram handler's list
+                self.histo_handler[i].vals = np.append(self.histo_handler[i].vals,
+                        [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
+                        axis=0)
+                self.update_varplot_axes()  # update the plot with the new values
         
-            return hist_num
+                hist_num = np.size(self.histo_handler[i].vals) // len(self.histo_handler[i].headers) - 1 # index for histograms
+                # append histogram stats to log file:
+                with open(self.log_file_names[i], 'a') as f:
+                    f.write(','.join([str(hist_num)] + stats[i]) + '\n')
+            
+                return hist_num
 
-        else: return -1 # if any of the labels are empty, do nothing
+            else: return -1 # if any of the labels are empty, do nothing
+
+    def choose_atom(self, toggle=True):
+        """Toggle which species of atom to include in the varplot"""
+        sender = self.sender()
+
+    def add_to_varplot(self, hist_han):
+        """The user selects which variable they want to display on the plot
+        The variables are read from the x and y axis QComboBoxes
+        Then the plot is updated with statistics from the histo_handler"""
+        if np.size(hist_han.vals) > 0:
+            xi = np.where(hist_han.headers == str(self.plot_labels[0].currentText()))[0][0]
+            hist_han.xvals = hist_han.vals[:, xi+1] # set x values
+            
+            y_label = str(self.plot_labels[1].currentText())
+            yi = np.where(hist_han.headers == y_label)[0][0]
+            hist_han.yvals = hist_han.vals[:, yi+1] # set y values
+
+            try:
+                self.varplot_canvas.plot(hist_han.xvals, hist_han.yvals, 
+                                            pen=None, symbol='o')
+                # add error bars if available:
+                if 'Loading probability'in y_label or 'Fidelity' in y_label:
+                    # add widget for errorbars
+                    err_bars = pg.ErrorBarItem(x=hist_han.xvals, 
+                                          y=hist_han.yvals, 
+                                          height=hist_han.vals[:,yi+2],
+                                          beam=0.5)
+                    self.varplot_canvas.addItem(err_bars)
+            except Exception: pass # probably wrong length of arrays
+
+    def update_varplot_axes(self, label=''):
+        """If the user has set the toggle for the given atom, then plot its 
+        histogram statistics on the varplot"""
+        self.varplot_canvas.clear()  # remove previous data
+        for i in range(len(self.histo_handler)):
+            if self.atom_varplot_toggles[self.atomX[i]].isChecked():
+                self.add_to_varplot(self.histo_handler[i])
+        
+
+    def clear_varplot(self):
+        """Clear the plot of histogram statistics by resetting the histo_handler.
+        The data is not lost since it has been appended to the log file."""
+        for hist_han in self.histo_handler:
+            hist_han.__init__ () # empty the stored arrays
+        self.varplot_canvas.clear()    # clear the displayed plot
 
 
     #### #### save and load data functions #### ####
 
     def update_stat_labels(self, args):
         """Set the text of the histogram statistics labels to the given arguments.
+        args is the results for all the atoms: [[Cs], [Rb]]
         The labels are: 'Counts above : below threshold', 'Number of images processed', 
         'Loading probability', 'Error in loading probability', Background peak count', 'Background peak width', 
         'Signal peak count', 'Signal peak width', 'Separation', 'Fidelity', 'Error in fidelity', 'Threshold'"""
-        for i, label in enumerate(['Counts above : below threshold']+list(self.histo_handler.headers[1:])):
-            self.stat_labels[label].setText(args[i])
+        for i in range(len(self.histo_handler)):
+            for ii, label in enumerate(['Counts above : below threshold']+list(self.histo_handler[i].headers[1:])):
+                self.stat_labels[self.atomX[i]+label].setText(args[i][ii])
 
 
     def get_stats(self):
         """Return the histogram statistics currently stored in the statistics labels
-        The data type is a list of strings
+        The data type is a list of strings for all atoms: [[Cs], [Rb]]
         user variable, images processed, loading probability, error in loading probability, 
         bg count, bg width, signal count, signal width, separation, threshold"""
-        stats = []
-        for label in ['Counts above : below threshold']+list(self.histo_handler.headers[1:]):
-            stats.append(self.stat_labels[label].text())
+        stats = [[],[]]
+        for i in range(len(self.histo_handler)):
+            for label in ['Counts above : below threshold']+list(self.histo_handler[i].headers[1:]):
+                stats[i].append(self.stat_labels[self.atomX[i]+label].text())
 
-        if 'Peak calculation failed' in stats[3]:
-            stats[3] = ''
-        # stats[0] is the ratio bg : signal 
-        return [self.var_edit.text()] + stats[1:]
+            if 'Peak calculation failed' in stats[i][3]:
+                stats[i][3] = ''
+            # stats[0] is the ratio bg : signal 
+            stats[i][0] = self.var_edit.text()
+        return stats
 
 
     def get_default_path(self, default_path='', option='hist'):
@@ -941,7 +980,7 @@ class main_window(QMainWindow):
         elif self.dir_watcher and option=='im':
             default_path = self.dir_watcher.image_storage_path
         elif option=='log':
-            default_path = os.path.dirname(self.log_file_name)
+            default_path = os.path.dirname(self.log_file_names[0])
         
         return default_path
 
@@ -955,9 +994,10 @@ class main_window(QMainWindow):
             elif 'PyQt5' in sys.modules:
                 file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
 
-            self.image_handler.set_pic_size(file_name) # sets image handler's pic size
-            self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
-            self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
+            for im_han in self.image_handler:
+                im_han.set_pic_size(file_name) # sets image handler's pic size
+                self.pic_size_edit.setText(str(im_han.pic_size)) # update loaded value
+                self.pic_size_label.setText(str(im_han.pic_size)) # update loaded value
 
         except OSError:
             pass # user cancelled - file not found
@@ -973,20 +1013,21 @@ class main_window(QMainWindow):
                 file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
 
             # get pic size from this image in case the user forgot to set it
-            self.image_handler.set_pic_size(file_name) # sets image handler's pic size
-            self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
-            self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
-            # get the position of the max count
-            self.image_handler.set_roi(im_name=file_name) # sets xc and yc
-            self.roi_x_edit.setText(str(self.image_handler.xc)) # update loaded value
-            self.roi_y_edit.setText(str(self.image_handler.yc)) 
-            self.roi_l_edit.setText(str(self.image_handler.roi_size))
-            self.xc_label.setText(str(self.image_handler.xc))
-            self.yc_label.setText(str(self.image_handler.yc))
-            self.l_label.setText(str(self.image_handler.roi_size))
-            self.roi.setPos(self.image_handler.xc - self.image_handler.roi_size//2, 
-            self.image_handler.yc - self.image_handler.roi_size//2) # set ROI in image display
-            self.roi.setSize(self.image_handler.roi_size, self.image_handler.roi_size)
+            for i in range(len(self.image_handler)):
+                self.image_handler[i].set_pic_size(file_name) # sets image handler's pic size
+                self.pic_size_edit.setText(str(self.image_handler[i].pic_size)) # update loaded value
+                self.pic_size_label.setText(str(self.image_handler[i].pic_size)) # update loaded value
+                # get the position of the max count
+                self.image_handler[i].set_roi(im_name=file_name) # sets xc and yc
+                self.roi_edits[self.atomX[i]+self.roi_label_text[0]].setText(str(self.image_handler[i].xc)) # update loaded value
+                self.roi_edits[self.atomX[i]+self.roi_label_text[1]].setText(str(self.image_handler[i].yc)) 
+                self.roi_edits[self.atomX[i]+self.roi_label_text[2]].setText(str(self.image_handler[i].roi_size))
+                self.roi_labels[self.atomX[i]+self.roi_label_text[0]].setText(str(self.image_handler[i].xc))
+                self.roi_labels[self.atomX[i]+self.roi_label_text[1]].setText(str(self.image_handler[i].yc))
+                self.roi_labels[self.atomX[i]+self.roi_label_text[2]].setText(str(self.image_handler[i].roi_size))
+                self.roi[i].setPos(self.image_handler[i].xc - self.image_handler[i].roi_size//2, 
+                            self.image_handler[i].yc - self.image_handler[i].roi_size//2) # set ROI in image display
+                self.roi[i].setSize(self.image_handler[i].roi_size, self.image_handler[i].roi_size)
 
         except OSError:
             pass # user cancelled - file not found
@@ -1004,7 +1045,10 @@ class main_window(QMainWindow):
             # don't update the threshold  - trust the user to have already set it
             # if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
             #     self.plot_current_hist(self.image_handler.hist_and_thresh)
-            self.image_handler.save_state(save_file_name) # save histogram
+            for i in range(len(self.image_handler)):
+                # save separate histograms for each atom, with the atom name at the start of the file
+                self.image_handler[i].save_state(os.path.join(os.path.dirname(save_file_name), 
+                        self.atomX[i]+os.path.basename(save_file_name))) # save histogram
             
             hist_num = self.add_stats_to_plot()
             
@@ -1180,7 +1224,7 @@ def run():
         app = QApplication(sys.argv) 
         
     main_win = main_window()
-    main_win.show()
+    main_win.showFullScreen() # display app over the full screen
     if standalone: # if an app instance was made, execute it
         sys.exit(app.exec_()) # when the window is closed, the python code also stops
 
