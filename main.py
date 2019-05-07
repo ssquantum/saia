@@ -737,7 +737,7 @@ class main_window(QMainWindow):
                 if 'Loading probability'in y_label or 'Fidelity' in y_label:
                     # add widget for errorbars
                     err_bars = pg.ErrorBarItem(x=self.histo_handler.xvals, 
-                                          y=self.hist_handler.yvals, 
+                                          y=self.histo_handler.yvals, 
                                           height=self.histo_handler.vals[:,yi+2],
                                           beam=0.5)
                     print('tried!!')
@@ -886,7 +886,7 @@ class main_window(QMainWindow):
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
         if not any([s == '' for s in stats]): # only add stats if the fit is successful
             # append current statistics to the histogram handler's list
-            self.hist_handler.vals = np.append(self.histo_handler.vals,
+            self.histo_handler.vals = np.append(self.histo_handler.vals,
                     [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
                     axis=0)
             self.update_varplot_axes()  # update the plot with the new values
