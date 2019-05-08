@@ -714,7 +714,8 @@ class main_window(QMainWindow):
                 new_stats = self.fit_gaussians()
                 diff = abs(oldthresh - self.image_handler.thresh) / float(oldthresh)
 
-            self.update_stat_labels(new_stats)
+            if new_stats: # fit_gaussians returns 0 if it fails
+                self.update_stat_labels(new_stats)
             
     
     def update_varplot_axes(self, label=''):
@@ -723,11 +724,11 @@ class main_window(QMainWindow):
         Then the plot is updated"""
         if np.size(self.histo_handler.vals) > 0:
             xi = np.where(self.histo_handler.headers == str(self.plot_labels[0].currentText()))[0][0]
-            self.histo_handler.xvals = self.histo_handler.vals[:, xi+1] # set x values
+            self.histo_handler.xvals = self.histo_handler.vals[:, xi] # set x values
             
             y_label = str(self.plot_labels[1].currentText())
             yi = np.where(self.histo_handler.headers == y_label)[0][0]
-            self.histo_handler.yvals = self.histo_handler.vals[:, yi+1] # set y values
+            self.histo_handler.yvals = self.histo_handler.vals[:, yi] # set y values
 
             self.varplot_canvas.clear()  # remove previous data
             try:
@@ -736,11 +737,15 @@ class main_window(QMainWindow):
                 # add error bars if available:
                 if 'Loading probability'in y_label or 'Fidelity' in y_label:
                     # add widget for errorbars
+                    # estimate sensible beam width at the end of the errorbar
+                    if np.size(self.histo_handler.xvals)//2:
+                        beam_width = 0.1*(self.histo_handler.xvals[1]-self.histo_handler.xvals[0])
+                    else:
+                        beam_width = 0.2
                     err_bars = pg.ErrorBarItem(x=self.histo_handler.xvals, 
                                           y=self.histo_handler.yvals, 
-                                          height=self.histo_handler.vals[:,yi+2],
-                                          beam=0.5)
-                    print('tried!!')
+                                          height=self.histo_handler.vals[:,yi+1],
+                                          beam=beam_width)
                     self.varplot_canvas.addItem(err_bars)
             except Exception: pass # probably wrong length of arrays
 
@@ -886,9 +891,12 @@ class main_window(QMainWindow):
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
         if not any([s == '' for s in stats]): # only add stats if the fit is successful
             # append current statistics to the histogram handler's list
-            self.histo_handler.vals = np.append(self.histo_handler.vals,
-                    [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
-                    axis=0)
+            if np.size(self.histo_handler.vals):
+                self.histo_handler.vals = np.append(self.histo_handler.vals,
+                        [list(map(float, stats))], axis=0)
+            else:  # if the array is empty we can't append to it
+                self.histo_handler.vals = np.array([list(map(float, stats))]) # needs the right shape
+
             self.update_varplot_axes()  # update the plot with the new values
     
             hist_num = np.size(self.histo_handler.vals) // len(self.histo_handler.headers) - 1 # index for histograms
@@ -917,14 +925,12 @@ class main_window(QMainWindow):
         The data type is a list of strings
         user variable, images processed, loading probability, error in loading probability, 
         bg count, bg width, signal count, signal width, separation, threshold"""
-        stats = []
-        for label in ['Counts above : below threshold']+list(self.histo_handler.headers[1:]):
+        stats = [self.var_edit.text()]
+        # the first stat_label is counts above:below threshold
+        for label in list(self.histo_handler.headers[1:]):
             stats.append(self.stat_labels[label].text())
-
-        if 'Peak calculation failed' in stats[3]:
-            stats[3] = ''
-        # stats[0] is the ratio bg : signal 
-        return [self.var_edit.text()] + stats[1:]
+        
+        return stats
 
 
     def get_default_path(self, default_path='', option='hist'):
