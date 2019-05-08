@@ -32,14 +32,14 @@ try:
     from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QIntValidator, QComboBox, QMenu, QActionGroup, 
-            QTabWidget, QVBoxLayout, QFont) 
+            QTabWidget, QVBoxLayout, QFont, QInputDialog) 
 except ModuleNotFoundError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent
     from PyQt5.QtGui import (QGridLayout, QMessageBox, QLineEdit, QIcon, 
             QFileDialog, QDoubleValidator, QIntValidator, QComboBox, QMenu, 
             QActionGroup, QVBoxLayout, QFont)
     from PyQt5.QtWidgets import (QApplication, QPushButton, QWidget, QTabWidget,
-        QAction, QMainWindow, QLabel)
+        QAction, QMainWindow, QLabel, QInputDialog)
           
 ####    ####    ####    ####
 
@@ -53,9 +53,9 @@ class main_window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.dir_watcher = None  # a button will initiate the dir watcher
-        self.image_handler = [ih.image_handler(), ih.image_handler()] # class to process images
-        self.histo_handler = [hh.histo_handler(), hh.histo_handler()] # class to process histograms
         self.atomX = ['Cs ', 'Rb ']   # term labels for atoms
+        self.image_handler = [ih.image_handler()]*len(self.atomX) # class to process images
+        self.histo_handler = [hh.histo_handler()]*len(self.atomX) # class to process histograms
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
@@ -126,7 +126,7 @@ class main_window(QMainWindow):
         hist_menu.addAction(save_hist)
 
         reset_hist = QAction('Reset histogram', self) # reset hist without loading new data
-        reset_hist.triggered.connect(self.load_empty_hist)
+        reset_hist.triggered.connect(self.check_reset)
         hist_menu.addAction(reset_hist)
         
         load_menu = QMenu('Load histogram data', self)  # drop down menu for loading hist
@@ -169,7 +169,7 @@ class main_window(QMainWindow):
             self.atom_varplot_toggles[X] = QAction(X, atom_menu, checkable=True,
                     checked=True)
             atom_menu.addAction(self.atom_varplot_toggles[X])
-            self.atom_varplot_toggles[X].triggered.connect(self.choose_atom)
+            self.atom_varplot_toggles[X].triggered.connect(self.update_varplot_axes)
         varplot_menu.addMenu(atom_menu)
 
         #### tab for settings  ####
@@ -207,9 +207,9 @@ class main_window(QMainWindow):
             for ii in range(len(self.roi_label_text)):
                 text = X + self.roi_label_text[ii]  # text for the label identifies the QLineEdit
                 new_label = QLabel(text, self)
-                settings_grid.addWidget(new_label, i,2*ii, 1,1)
+                settings_grid.addWidget(new_label, i+1,2*ii, 1,1)
                 self.roi_edits[text] = QLineEdit(self)
-                settings_grid.addWidget(self.roi_edits[text], i,2*ii+1, 1,1)
+                settings_grid.addWidget(self.roi_edits[text], i+1,2*ii+1, 1,1)
                 self.roi_edits[text].setText(str(ii//2)) # default
                 self.roi_edits[text].textEdited[str].connect(self.roi_text_edit)
                 self.roi_edits[text].setValidator(int_validator) # only numbers
@@ -249,7 +249,7 @@ class main_window(QMainWindow):
         self.tabs.addTab(hist_tab, "Histogram")
 
         # main subplot of histogram
-        self.hist_canvas = [pg.PlotWidget(), pg.PlotWidget()]
+        self.hist_canvas = [pg.PlotWidget()]*len(self.atomX)
         for i in range(len(self.hist_canvas)):
             self.hist_canvas[i].getAxis('bottom').tickFont = font
             self.hist_canvas[i].getAxis('left').tickFont = font # not doing anything...
@@ -873,26 +873,24 @@ class main_window(QMainWindow):
         and add the values to the variable plot, saving the parameters to the log
         file at the same time. If any of the labels are empty, do nothing and return -1"""
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
-        for i in range(len(stats)):
+
+        for i in range(len(stats)): # should loop over the atoms
             if not any([s == '' for s in stats[i]]): # only add stats if the fit is successful
                 # append current statistics to the histogram handler's list
-                self.histo_handler[i].vals = np.append(self.histo_handler[i].vals,
-                        [np.concatenate(([float(self.var_edit.text())], list(map(float, stats))))],
-                        axis=0)
+                if np.size(self.histo_handler[i].vals):
+                    self.histo_handler[i].vals = np.append(self.histo_handler[i].vals,
+                            [list(map(float, stats[i]))], axis=0)
+                else:  # if the array is empty we can't append to it
+                    self.histo_handler[i].vals = np.array([list(map(float, stats[i]))]) # needs the right shape
+                
                 self.update_varplot_axes()  # update the plot with the new values
         
                 hist_num = np.size(self.histo_handler[i].vals) // len(self.histo_handler[i].headers) - 1 # index for histograms
                 # append histogram stats to log file:
                 with open(self.log_file_names[i], 'a') as f:
                     f.write(','.join([str(hist_num)] + stats[i]) + '\n')
-            
-                return hist_num
-
-            else: return -1 # if any of the labels are empty, do nothing
-
-    def choose_atom(self, toggle=True):
-        """Toggle which species of atom to include in the varplot"""
-        sender = self.sender()
+                
+        return hist_num
 
     def add_to_varplot(self, hist_han):
         """The user selects which variable they want to display on the plot
@@ -900,22 +898,27 @@ class main_window(QMainWindow):
         Then the plot is updated with statistics from the histo_handler"""
         if np.size(hist_han.vals) > 0:
             xi = np.where(hist_han.headers == str(self.plot_labels[0].currentText()))[0][0]
-            hist_han.xvals = hist_han.vals[:, xi+1] # set x values
+            hist_han.xvals = hist_han.vals[:, xi] # set x values
             
             y_label = str(self.plot_labels[1].currentText())
             yi = np.where(hist_han.headers == y_label)[0][0]
-            hist_han.yvals = hist_han.vals[:, yi+1] # set y values
+            hist_han.yvals = hist_han.vals[:, yi] # set y values
 
             try:
                 self.varplot_canvas.plot(hist_han.xvals, hist_han.yvals, 
                                             pen=None, symbol='o')
                 # add error bars if available:
                 if 'Loading probability'in y_label or 'Fidelity' in y_label:
+                    # estimate sensible beam width at the end of the errorbar
+                    if np.size(hist_han.xvals)//2:
+                        beam_width = 0.1*(hist_han.xvals[1]-hist_han.xvals[0])
+                    else:
+                        beam_width = 0.2
                     # add widget for errorbars
                     err_bars = pg.ErrorBarItem(x=hist_han.xvals, 
                                           y=hist_han.yvals, 
-                                          height=hist_han.vals[:,yi+2],
-                                          beam=0.5)
+                                          height=hist_han.vals[:,yi+1],
+                                          beam=beam_width)
                     self.varplot_canvas.addItem(err_bars)
             except Exception: pass # probably wrong length of arrays
 
@@ -954,15 +957,12 @@ class main_window(QMainWindow):
         The data type is a list of strings for all atoms: [[Cs], [Rb]]
         user variable, images processed, loading probability, error in loading probability, 
         bg count, bg width, signal count, signal width, separation, threshold"""
-        stats = [[],[]]
-        for i in range(len(self.histo_handler)):
-            for label in ['Counts above : below threshold']+list(self.histo_handler[i].headers[1:]):
+        stats = [[self.var_edit.text()]]*len(self.atomX)
+        for i in range(len(self.histo_handler)): # loop over atoms
+            # the first stat label is the ratio bg : signal 
+            for label in list(self.histo_handler[i].headers[1:]):
                 stats[i].append(self.stat_labels[self.atomX[i]+label].text())
 
-            if 'Peak calculation failed' in stats[i][3]:
-                stats[i][3] = ''
-            # stats[0] is the ratio bg : signal 
-            stats[i][0] = self.var_edit.text()
         return stats
 
 
@@ -1013,7 +1013,7 @@ class main_window(QMainWindow):
                 file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
 
             # get pic size from this image in case the user forgot to set it
-            for i in range(len(self.image_handler)):
+            for i in range(len(self.atomX)):  # loop over atomic species
                 self.image_handler[i].set_pic_size(file_name) # sets image handler's pic size
                 self.pic_size_edit.setText(str(self.image_handler[i].pic_size)) # update loaded value
                 self.pic_size_label.setText(str(self.image_handler[i].pic_size)) # update loaded value
@@ -1033,8 +1033,9 @@ class main_window(QMainWindow):
             pass # user cancelled - file not found
 
 
-    def save_hist_data(self, trigger=None):
-        """Prompt the user to give a directory to save the histogram data, then save"""
+    def save_hist_data(self, trigger=None, atoms=range(2)):
+        """Prompt the user to give a directory to save the histogram data, then save
+        atoms specifies which histograms to save, referring to the indices of self.atomX"""
         default_path = self.get_default_path()
         try:
             if 'PyQt4' in sys.modules:
@@ -1043,74 +1044,73 @@ class main_window(QMainWindow):
                 save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             
             # don't update the threshold  - trust the user to have already set it
-            # if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
-            #     self.plot_current_hist(self.image_handler.hist_and_thresh)
-            for i in range(len(self.image_handler)):
+            for i in atoms:
                 # save separate histograms for each atom, with the atom name at the start of the file
                 self.image_handler[i].save_state(os.path.join(os.path.dirname(save_file_name), 
-                        self.atomX[i]+os.path.basename(save_file_name))) # save histogram
+                        self.atomX[i].replace(' ','')+os.path.basename(save_file_name))) # save histogram
             
             hist_num = self.add_stats_to_plot()
             
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Information)
-            msg.setText("File saved to "+save_file_name+"\n"+
-                    "and appended histogram %s to log file."%hist_num)
+            msg.setText("The following files were saved to directory "+os.path.dirname(save_file_name)+" \n"+
+                    "\n".join([X.replace(' ','')+os.path.basename(save_file_name) for X in self.atomX])+
+                    "\n\nand histogram %s was appended to the log files."%hist_num)
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
 
         except OSError:
             pass # user cancelled - file not found
 
+    def get_choice_idx(self, choice):
+        """return the indices where choices match self.atomX
+        If the choice is 'None' then idxs remains empty"""
+        idxs = [] # indices of the atomic species to include
+        if 'All' in choice:
+            idxs = range(len(self.atomX))
+        else: # find the indexes corresponding to the chosen atoms
+            for i in range(len(self.atomX)):
+                if self.atomX[i] in choice:
+                    idxs.append(i)
+        return idxs
+
     def check_reset(self):
-        """Ask the user if they would like to reset the current data stored"""
-        reply = QMessageBox.question(self, 'Confirm Data Replacement',
-            "Do you want to discard the current data?", 
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
-        
-        if reply == QMessageBox.Cancel:
-            return 0
+        """Ask the user if they would like to save/reset the current data stored"""
+        options = ['None'] + [save+X for save in ['Save first, reset ', 'reset '] 
+                                                    for X in ['All ']+self.atomX]
 
-        elif reply == QMessageBox.Yes:
-            self.image_handler.reset_arrays() # gets rid of old data
+        choice, ok = QInputDialog.getItem(self, 'Confirm Data Replacement',
+            "Choose the atomic species that you want to reset:", options, 
+            current=0, editable=False)
 
-        return 1
+        idxs = self.get_choice_idx(choice)
+        if ok:
+            if 'Save' in choice: # prompt user for file name then save
+                self.save_hist_data(atoms=idxs)
+            for i in idxs:
+                self.image_handler[i].reset_arrays() # get rid of old data
+                self.hist_canvas[i].clear() # remove old histogram from display
 
-    def load_empty_hist(self):
-        """Prompt the user with options to save the data and then reset the 
-        histogram"""
-        reply = QMessageBox.question(self, 'Confirm reset', 
-            'Save the current histogram before resetting?',
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Cancel)
+        return choice, ok, idxs
 
-        if reply == QMessageBox.Cancel:
-            return 0
-        
-        elif reply == QMessageBox.Yes:
-            self.save_hist_data()  # prompt user for file name then save
-            self.image_handler.reset_arrays() # get rid of old data
-            self.hist_canvas.clear() # remove old histogram from display
-
-        elif reply == QMessageBox.No:
-            self.image_handler.reset_arrays() # get rid of old data
-            self.hist_canvas.clear() # remove old histogram from display
-        
 
     def load_from_files(self, trigger=None):
         """Prompt the user to select image files to process, then sequentially process
         them and update the histogram"""
         default_path = self.get_default_path(option='im')
+        _, ok, _ = self.check_reset() # ask the user to select which atom
             
-        if self.check_reset():
+        if ok: # False if the user cancelled
             try:
                 self.recent_label.setText('Processing files...') # comes first otherwise not executed
                 if 'PyQt4' in sys.modules:
                     file_list = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 elif 'PyQt5' in sys.modules:
                     file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
+
                 for file_name in file_list:
-                    self.image_handler.process(file_name)
+                    for im_han in self.image_handler:
+                        im_han.process(file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
                 self.update_stats()
@@ -1124,15 +1124,18 @@ class main_window(QMainWindow):
         """Prompt the user to select a csv file to load histogram data from.
         It must have the specific layout that the image_handler saves in."""
         default_path = self.get_default_path()
+        _, ok, _ = self.check_reset() # ask the user to select which atom
             
-        if self.check_reset():
+        if ok:
             try:
                 # the implementation of QFileDialog changed...
                 if 'PyQt4' in sys.modules: 
                     file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 elif 'PyQt5' in sys.modules:
                     file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
-                self.image_handler.load_from_csv(file_name)
+                
+                for im_han in self.image_handler:
+                    im_han.load_from_csv(file_name)
                 self.update_stats()
 
             except OSError:
@@ -1163,7 +1166,10 @@ class main_window(QMainWindow):
                 file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
             elif 'PyQt5' in sys.modules:
                 file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
-            self.histo_handler.load_from_log(file_name)
+
+            for i in range(len(self.atomX)):
+                if self.atomX[i] in file_name:
+                    self.histo_handler[i].load_from_log(file_name)
             self.update_varplot_axes()
 
         except OSError:
@@ -1193,21 +1199,19 @@ class main_window(QMainWindow):
     def closeEvent(self, event):
         """Prompt user to save data on closing"""
         reply = QMessageBox.question(self, 'Confirm Action',
-            "Save before closing?", QMessageBox.Yes |
-            QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
+            "Save before closing?", QMessageBox.Save |
+            QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.Save:
             self.save_hist_data()         # save current state
             
             if self.dir_watcher:          # make sure that the directory watcher stops
-                self.dir_watcher.observer.stop()
-                
+                self.dir_watcher.observer.stop()   
             event.accept()
         
-        elif reply == QMessageBox.No:
+        elif reply == QMessageBox.Discard:
             if self.dir_watcher: # make sure that the directory watcher stops
                 self.dir_watcher.observer.stop()
-                
             event.accept()
             
         else:
@@ -1224,7 +1228,7 @@ def run():
         app = QApplication(sys.argv) 
         
     main_win = main_window()
-    main_win.showFullScreen() # display app over the full screen
+    main_win.showMaximized() # display app over the full screen
     if standalone: # if an app instance was made, execute it
         sys.exit(app.exec_()) # when the window is closed, the python code also stops
 
