@@ -41,7 +41,9 @@ class image_handler:
     then compare to the threshold
     for speed, make an array of counts with length n. If the number of images
     analysed exceeds (n-10) of this length then append another n"""
-    def __init__(self):
+    def __init__(self, atom_index=0, atom_symbol='Cs '):
+        self.i = atom_index             # indicates the index of this handler in the list
+        self.X = atom_symbol            # the name of the atom that this handler deals with
         self.delim = ' '                # delimieter to use when opening files
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts over the ROI
