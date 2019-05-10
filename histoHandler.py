@@ -23,4 +23,4 @@ class histo_handler:
 
     def load_from_log(self, fname):
         """load data from a log file"""
-        self.vals = np.loadtxt(fname, skiprows=3, delimiter=',')
+        self.vals = np.loadtxt(fname, skiprows=3, delimiter=',')[:,1:]
