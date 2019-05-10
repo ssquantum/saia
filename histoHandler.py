@@ -12,7 +12,8 @@ class histo_handler:
     signal count, signal width, separation, threshold, images processed
     """
     def __init__(self, atom_index=0, atom_symbol='Cs '):
-        self.headers = np.array(['User variable', 'Number of images processed', 
+        self.headers = np.array(['User variable', 'Number of images processed',
+            'No atoms' , 'Single atom', 'Both atoms',
             'Loading probability', 'Error in loading probability',
             'Background peak count', 'Background peak width', 
             'Signal peak count', 'Signal peak width', 'Separation', 
@@ -24,5 +25,5 @@ class histo_handler:
         self.X        = atom_symbol # the name of the atom that this handler deals with
 
     def load_from_log(self, fname):
-        """load data from a log file"""
-        self.vals = np.loadtxt(fname, skiprows=3, delimiter=',')
+        """load data from a log file, the first column is histogram number"""
+        self.vals = np.loadtxt(fname, skiprows=3, delimiter=',')[:,1:]

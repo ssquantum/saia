@@ -122,7 +122,7 @@ class main_window(QMainWindow):
         # histogram menu saves/loads/resets histogram and gives binning options
         hist_menu =  menubar.addMenu('Histogram')
 
-        save_hist = QAction('Save histogram', self) # save current hist to csv
+        save_hist = QAction('Save histograms', self) # save current hist to csv
         save_hist.triggered.connect(self.save_hist_data)
         hist_menu.addAction(save_hist)
 
@@ -620,6 +620,23 @@ class main_window(QMainWindow):
     
     #### #### toggle functions #### #### 
 
+    def get_correlation(self, atom1, atom2, out_type='str'):
+        """Given atom arrays 1 and 2 containing the comparison of the counts to the threshold value,
+        output the cases where the image contains: no atoms, only atom1, only atom2, both atoms
+        out_type: str - give the number in each case as a string
+                index - give the indexes satisfying each case.
+        NB: this doesn't crash when atom1, atom2 have different length, but it is assuming that the
+        indexing refers to the same files"""
+        no_atom = np.where(np.isin(np.where(atom1 == 0)[0], np.where(atom2 == 0)[0]))[0] # neither atom present
+        only_1  = np.where(np.isin(np.where(atom1 >  0)[0], np.where(atom2 == 0)[0]))[0] # only atom1 present
+        only_2  = np.where(np.isin(np.where(atom1 == 0)[0], np.where(atom2 >  0)[0]))[0] # only atom2 present
+        both    = np.where(np.isin(np.where(atom1 >  0)[0], np.where(atom2 >  0)[0]))[0] # both atoms present
+        if out_type == 'str':
+            return list(map(str, map(np.size, [no_atom, only_1, only_2, both])))
+        elif out_type == 'index':
+            return [no_atom, only_1, only_2, both]
+        
+
     def update_stats(self, toggle=True):
         """Update the statistics from the current histograms
         image_handler uses a peak finding algorithm to get the peak positions and widths
@@ -633,9 +650,9 @@ class main_window(QMainWindow):
                 else:
                     self.plot_current_hist([im_han.hist_and_thresh]) # update hist and get peak stats
 
-
-                atom_count = np.size(np.where(im_han.atom > 0)[0])  # images with counts above threshold
-                empty_count = np.size(np.where(im_han.atom[:im_han.im_num] == 0)[0])
+                atom_array = im_han.atom[:im_han.im_num]    # images with counts above threshold
+                atom_count = np.size(np.where(atom_array > 0)[0])  # images with counts above threshold
+                empty_count = np.size(np.where(atom_array == 0)[0])
                 loading_prob = np.around(atom_count/im_han.im_num, 4)
                 # use the binomial distribution to get 1 sigma confidence intervals:
                 conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
@@ -652,11 +669,18 @@ class main_window(QMainWindow):
                     peak_stats[5] = im_han.fidelity            # fidelity
                     peak_stats[6] = im_han.err_fidelity        # error in fidelity
                 # set text on labels:
-                # counts above:below threshold, images processed, loading probability, error in loading probability,
-                # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+                # counts above:below threshold, images processed, images with no atoms, single atom, both atoms,
+                # loading probability, error in loading probability, bg count, bg width, 
+                # signal count, signal width, separation, fidelity, error in fidelity, threshold
                 new_stats.append(([str(atom_count) + ' : ' + str(empty_count), str(im_han.im_num),
+                    atom_array, atom_array, atom_array,
                     str(loading_prob), str(loading_err)] + list(map(str, peak_stats)) + [str(int(im_han.thresh))]))
-
+        # calculate correlations:  - assuming only two atoms!
+        if new_stats and len(new_stats[0]) == len(self.histo_handler[0].headers):
+            no_atom, only_1, only_2, both = self.get_correlation(new_stats[0][2], new_stats[1][2], out_type='str')
+            new_stats[0][2], new_stats[1][2] = no_atom, no_atom # neither atom present
+            new_stats[0][3], new_stats[1][3] = only_1,  only_2  # just one atom present
+            new_stats[0][4], new_stats[1][4] = both,    both    # both atoms present
         self.update_stat_labels(new_stats)
         return new_stats
 
@@ -702,8 +726,9 @@ class main_window(QMainWindow):
 
             # update atom statistics
             im_han.atom[:im_han.im_num] = im_han.counts[:im_han.im_num] // im_han.thresh   # update atom presence
-            atom_count = np.size(np.where(im_han.atom > 0)[0]) # images with counts above threshold
-            empty_count = np.size(np.where(im_han.atom[:im_han.im_num] == 0)[0]) # images with counts below threshold
+            atom_array = im_han.atom[:im_han.im_num]
+            atom_count = np.size(np.where(atom_array > 0)[0]) # images with counts above threshold
+            empty_count = np.size(np.where(atom_array == 0)[0]) # images with counts below threshold
             loading_prob = np.around(atom_count/im_han.im_num, 4) # loading probability
             # use the binomial distribution to get 1 sigma confidence intervals:
             conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
@@ -713,10 +738,12 @@ class main_window(QMainWindow):
             # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
             # note: Gaussian beam waist is 2x standard deviation
             results.append([str(atom_count) + ' : ' + str(empty_count), str(im_han.im_num),
+                atom_array, atom_array, atom_array, # to be filled in with presence of no, single, or both atoms
                 str(loading_prob), str(loading_err), "%.0f"%best_fits[0].ps[1], "%.0f"%(best_fits[0].ps[2]/2.), 
                 "%.0f"%best_fits[1].ps[1], "%.0f"%(best_fits[1].ps[2]/2.), "%.0f"%(best_fits[1].ps[1] - 
                 best_fits[0].ps[1]), str(im_han.fidelity), str(im_han.err_fidelity),
                 str(int(im_han.thresh))])
+        # note: will fill in results[i][2:5] in self.update_fit
         return results
 
     def update_fit(self, toggle=True):
@@ -736,6 +763,11 @@ class main_window(QMainWindow):
                 diff = abs(oldthresh - np.array([x.thresh for x in self.image_handler])) / oldthresh
 
             if new_stats: # fit_gaussians returns 0 if the fit fails
+                if np.size(new_stats) == len(self.image_handler) * len(self.histo_handler[0].headers):
+                    no_atom, only_1, only_2, both = self.get_correlation(new_stats[0][2], new_stats[1][2], out_type='str')
+                    new_stats[0][2], new_stats[1][2] = no_atom, no_atom # neither atom present
+                    new_stats[0][3], new_stats[1][3] = only_1,  only_2  # just one atom present
+                    new_stats[0][4], new_stats[1][4] = both,    both    # both atoms present
                 self.update_stat_labels(new_stats)
             
     
@@ -1051,24 +1083,26 @@ class main_window(QMainWindow):
             elif 'PyQt5' in sys.modules:
                 save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             
-            # don't update the threshold  - trust the user to have already set it
-            for i in atoms:
-                # save separate histograms for each atom, with the atom name at the start of the file
-                self.image_handler[i].save_state(os.path.join(os.path.dirname(save_file_name), 
-                        self.atomX[i].replace(' ','')+os.path.basename(save_file_name))) # save histogram
-            
-            hist_num = self.add_stats_to_plot()
-            
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("The following files were saved to directory "+os.path.dirname(save_file_name)+" \n"+
-                    "\n".join([self.atomX[i].replace(' ','')+os.path.basename(save_file_name) for i in atoms])+
-                    "\n\nand histogram %s was appended to the log files."%hist_num)
-            msg.setStandardButtons(QMessageBox.Ok)
-            msg.exec_()
+            if save_file_name:
+                # don't update the threshold  - trust the user to have already set it
+                for i in atoms:
+                    # save separate histograms for each atom, with the atom name at the start of the file
+                    self.image_handler[i].save_state(os.path.join(os.path.dirname(save_file_name), 
+                            self.atomX[i].replace(' ','')+os.path.basename(save_file_name))) # save histogram
+                
+                hist_num = self.add_stats_to_plot()
+                
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Information)
+                msg.setText("The following files were saved to directory "+os.path.dirname(save_file_name)+" \n"+
+                        "\n - ".join([self.atomX[i].replace(' ','')+os.path.basename(save_file_name) for i in atoms])+
+                        "\n\nand histogram %s was appended to the log files."%hist_num)
+                msg.setStandardButtons(QMessageBox.Ok)
+                msg.exec_()
+                return 1
 
         except OSError:
-            pass # user cancelled - file not found
+            return 0 # user cancelled - file not found
 
     def get_choice_idx(self, choice):
         """return the indices where choices match self.atomX
@@ -1094,10 +1128,15 @@ class main_window(QMainWindow):
         idxs = self.get_choice_idx(choice)
         if ok:
             if 'Save' in choice: # prompt user for file name then save
-                self.save_hist_data(atoms=idxs)
-            for i in idxs:
-                self.image_handler[i].reset_arrays() # get rid of old data
-                self.hist_canvas[i].clear() # remove old histogram from display
+                if self.save_hist_data(atoms=idxs):
+                    # only reset the histograms if the save was successful
+                    for i in idxs:
+                        self.image_handler[i].reset_arrays() # get rid of old data
+                        self.hist_canvas[i].clear() # remove old histogram from display
+            else:
+                for i in idxs:
+                    self.image_handler[i].reset_arrays() # get rid of old data
+                    self.hist_canvas[i].clear() # remove old histogram from display
 
         return choice, ok, idxs
 
@@ -1136,14 +1175,16 @@ class main_window(QMainWindow):
             
         if ok:
             try:
-                # the implementation of QFileDialog changed...
-                if 'PyQt4' in sys.modules: 
-                    file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
-                elif 'PyQt5' in sys.modules:
-                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
+                for im_han in self.image_handler: # load separate csv files for each atom
+                    if 'PyQt4' in sys.modules: 
+                        file_name = QFileDialog.getOpenFileName(self, 'Select File for '+im_han.X, 
+                                                            default_path, 'csv(*.csv);;all (*)')
+                    elif 'PyQt5' in sys.modules:
+                        file_name, _ = QFileDialog.getOpenFileName(self, 'Select File for '+im_han.X, 
+                                                            default_path, 'csv(*.csv);;all (*)')
                 
-                for im_han in self.image_handler:
                     im_han.load_from_csv(file_name)
+
                 self.update_stats()
 
             except OSError:
@@ -1169,15 +1210,15 @@ class main_window(QMainWindow):
         default_path = self.get_default_path(option='log')
         
         try:
-            # the implementation of QFileDialog changed...
-            if 'PyQt4' in sys.modules: 
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
-            elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
+            for hist_han in self.histo_handler:
+                if 'PyQt4' in sys.modules: 
+                    file_name = QFileDialog.getOpenFileName(self, 'Select File for '+hist_han.X, 
+                                                            default_path, 'dat(*.dat);;all (*)')
+                elif 'PyQt5' in sys.modules:
+                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select File for '+hist_han.X, 
+                                                            default_path, 'dat(*.dat);;all (*)')
 
-            for i in range(len(self.atomX)):
-                if self.atomX[i] in file_name:
-                    self.histo_handler[i].load_from_log(file_name)
+                    hist_han.load_from_log(file_name)
             self.update_varplot_axes()
 
         except OSError:
