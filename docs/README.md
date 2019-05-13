@@ -1,4 +1,8 @@
-﻿How to run Single Atom Image Analysis (SAIA):
+﻿**** Version 2.0 ****
+Produces histograms for two independent regions of interest corresponding to two different tweezers.
+**** ****
+
+How to run Single Atom Image Analysis (SAIA):
 	• Start the file: 
 		○ Execute runSAIA.bat   --- a windows batch file with a hardcoded link to the Enthought python executable
 		○ Or run from a python distribution (e.g.  python main.py)
