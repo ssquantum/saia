@@ -763,7 +763,7 @@ class main_window(QMainWindow):
                 diff = abs(oldthresh - np.array([x.thresh for x in self.image_handler])) / oldthresh
 
             if new_stats: # fit_gaussians returns 0 if the fit fails
-                if np.size(new_stats) == len(self.image_handler) * len(self.histo_handler[0].headers):
+                if len(new_stats) == len(self.image_handler) and len(new_stats[0]) == len(self.histo_handler[0].headers): 
                     no_atom, only_1, only_2, both = self.get_correlation(new_stats[0][2], new_stats[1][2], out_type='str')
                     new_stats[0][2], new_stats[1][2] = no_atom, no_atom # neither atom present
                     new_stats[0][3], new_stats[1][3] = only_1,  only_2  # just one atom present
