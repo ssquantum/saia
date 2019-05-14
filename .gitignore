@@ -4,3 +4,5 @@ __pycache__/
 
 # ignore the following files
 runSAIA.bat
+run_with_enthought.bat
+run_with_conda.bat
