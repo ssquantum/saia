@@ -136,7 +136,7 @@ class image_handler:
         # background statistics: mean count and standard deviation across image
         N = np.size(full_im) - np.size(self.im_vals)
         self.mean_count[self.im_num] = np.sum(not_roi) / N
-        self.std_count[self.im_num] = np.sqrt(np.sum(not_roi**2) / (N - 1))
+        self.std_count[self.im_num] = np.sqrt(np.sum((not_roi-self.mean_count[self.im_num])**2) / (N - 1))
 
         # sum of counts in the ROI of the image gives the signal
         self.counts[self.im_num] = np.sum(self.im_vals) # / np.size(self.im_vals) # mean
