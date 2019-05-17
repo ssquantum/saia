@@ -399,7 +399,8 @@ class main_window(QMainWindow):
     def init_DW(self):
         """Ask the user if they want to start the dir watcher or not"""
         dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
-        text = "Loaded from config.dat:\n"
+        text = "*** REMEMBER TO SAVE CAMERA SETTINGS ***\n\n"
+        text += "Loaded from config.dat:\n"
         text += dw.dir_watcher.print_dirs(*dir_watcher_dirs) # static method
         text += "\nStart the directory watcher with these settings?"
         reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
@@ -431,6 +432,7 @@ class main_window(QMainWindow):
         thread and delete the instance to ensure it doesn't run in the 
         background (which might overwrite files)."""
         if self.dir_watcher: # check if there is a current thread
+            self.print_times("ms")  # prints performance of dir_watcher
             self.dir_watcher.observer.stop() # ensure that the old thread stops
             self.dir_watcher = None
             self.dw_status_label.setText("Stopped")
@@ -442,6 +444,7 @@ class main_window(QMainWindow):
             self.dir_watcher = dw.dir_watcher() # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
+            self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number
             self.dw_status_label.setText("Running")
 
             # get current date
@@ -1157,7 +1160,10 @@ class main_window(QMainWindow):
 
                 for file_name in file_list:
                     for im_han in self.image_handler:
-                        im_han.process(file_name)
+                        try:
+                            im_han.process(file_name)
+                        except:
+                            print("\n WARNING: failed to load "+file_name)
                     self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
             
                 self.update_stats()
@@ -1230,16 +1236,19 @@ class main_window(QMainWindow):
     def print_times(self, unit="s"):
         """Display the times measured for functions"""
         scale = 1
-        if unit == "ms":
+        if unit == "ms" or unit == "milliseconds":
             scale *= 1e3
         elif unit == "us" or unit == "microseconds":
             scale *= 1e6
         else:
             unit = "s"
         if self.dir_watcher: # this is None if dir_watcher isn't initiated
-            print("File copying event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("\nFile copying event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("Most recent idle time between events: %.4g "%(self.dir_watcher.event_handler.idle_t*scale)+unit)
             print("Image processing duration: %.4g "%(self.int_time*scale)+unit)
             print("Image plotting duration: %.4g "%(self.plot_time*scale)+unit)
+            print("File writing duration: %.4g "%(self.dir_watcher.event_handler.write_t*scale)+unit)
+            print("File copying duration: %.4g "%(self.dir_watcher.event_handler.copy_t*scale)+unit)
         else: 
             print("Initiate the directory watcher before testing timings")
 
