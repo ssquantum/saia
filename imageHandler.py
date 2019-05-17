@@ -172,7 +172,9 @@ class image_handler:
                 self.peak_widths[1]) - norm.cdf(thresh, self.peak_counts[0] + self.peak_widths[0],
                 self.peak_widths[0]) + norm.cdf(thresh, self.peak_counts[1] - self.peak_widths[1],
                 self.peak_widths[1])
-        return fidelity, err_fidelity
+            return fidelity, err_fidelity
+        else:
+            return -1, -1  # calculation failed
 
     def search_fidelity(self, p1, p2, n=10):
         """Take n values for the threshold between positions p1 and p2

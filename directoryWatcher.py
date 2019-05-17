@@ -38,44 +38,70 @@ class system_event_handler(FileSystemEventHandler, QThread):
         self.image_storage_path = image_storage_path  # directory where we copy images to
         self.dexter_sync_file_name = dexter_sync_file_name # path to file where dexter syncs its file #
         self.date = date # today's date
-        # self.init_t = time.time()      # time of initiation: use to test how long it takes to realise an event is started
+        self.init_t = time.time()      # time of initiation: use to test how long it takes to realise an event is started
         self.event_t = 0           # time taken to process the last event
         self.end_t = time.time()   # time at end of event
         self.idle_t = 0            # time between events
+        self.write_t = 0           # time taken to watch a file being written
+        self.copy_t = 0            # time taken to watch a file being copied 
+        
+    def wait_for_file(self, file_name, dt=0.01):
+        """Make sure that the file has finished being written by waiting until
+        the file size isn't changing anymore"""
+        last_file_size = -1
+        while last_file_size != os.path.getsize(file_name): 
+            last_file_size = os.path.getsize(file_name)
+            time.sleep(dt) # deliberately add pause so we don't loop too many times
+            
+    def sync_dexter(self, dt=1e-3):
+        """Get the Dexter file number from the dexter_sync_file_name file
+        Check if the file is empty (usually means it's being written)
+        and wait until it's finished being written to"""
+        new_dfn = '' # sometimes Dexter hasn't finished writing to file, we should wait til it has.
+        while new_dfn == '': # note: this usually takes about 10 ms.
+            with open(self.dexter_sync_file_name, 'r') as sync_file:
+                new_dfn = sync_file.read()
+            if new_dfn != '':
+                if self.dfn != str(int(new_dfn)):
+                    self.dfn = str(int(new_dfn))
+                else: # sometimes Dexter hasn't updated the file number yet
+                    self.dfn = str(int(new_dfn)+1)
+                break
+            time.sleep(dt) # deliberately add pause so we don't loop too many times
     
     def on_created(self, event):
         """On a new image being written, save the file with a synced label into the 
         image storage dir"""
         t0 = time.time()
-        self.idle_t = self.end_t - t0   # duration between end of last event and start of current event
-        # if event.event_type == 'created' or event.event_type == 'modified': # ignoring deletion or move events
-        # print("--- --- --- ---")
-        # print(event.event_type)
-        # print(event.src_path)
+        self.idle_t = t0 - self.end_t   # duration between end of last event and start of current event
         
-        time.sleep(0.3) # need to wait sufficient time for Dexter to update the file number
+        self.wait_for_file(event.src_path) # wait until file has been written        
+        self.write_t = time.time() - t0
+        
         # get Dexter file number  
-        with open(self.dexter_sync_file_name, 'r') as sync_file:
-                self.dfn = str(int(sync_file.read()))
+        self.sync_dexter()
                 
         # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
         new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
+        
+        self.copy_t = time.time()
         try:
             shutil.copyfile(event.src_path, new_file_name)
         except PermissionError:
             print("WARNING: added a pause because python tried to access the file before the other program had let go")
             time.sleep(0.2)
             shutil.copyfile(event.src_path, new_file_name)
-        time.sleep(0.1)  # add in latency in case it tries to delete the file before it's been saved.
         
+        
+        self.wait_for_file(new_file_name) # wait until file has been copied
+        self.copy_t = time.time() - self.copy_t
         try:
             os.remove(event.src_path)  # delete the old file so that we can see a new created file event
         except PermissionError:
             print("WARNING: added a pause because python tried to access the file before the other program had let go")
-            time.sleep(1)
+            time.sleep(0.5)
             os.remove(event.src_path)
         
-        # time.sleep(0.5)
         self.last_event_path = new_file_name  # update last event path
         self.event_path.emit(new_file_name)  # emit signal
         

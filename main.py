@@ -443,6 +443,7 @@ class main_window(QMainWindow):
         thread and delete the instance to ensure it doesn't run in the 
         background (which might overwrite files)."""
         if self.dir_watcher: # check if there is a current thread
+            self.print_times("ms")  # prints performance of dir_watcher
             self.dir_watcher.observer.stop() # ensure that the old thread stops
             self.dir_watcher = None
             self.dw_status_label.setText("Stopped")
@@ -454,6 +455,7 @@ class main_window(QMainWindow):
             self.dir_watcher = dw.dir_watcher() # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
+            self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number
             self.dw_status_label.setText("Running")
 
             # get current date
@@ -1072,8 +1074,11 @@ class main_window(QMainWindow):
                 elif 'PyQt5' in sys.modules:
                     file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 for file_name in file_list:
-                    self.image_handler.process(file_name)
-                    self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
+                    try:
+                        self.image_handler.process(file_name)
+                        self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
+                    except:
+                        print("\n WARNING: failed to load "+file_name) # probably file size was wrong
             
                 self.update_stats()
                 if self.recent_label.text == 'Processing files...':
@@ -1137,16 +1142,19 @@ class main_window(QMainWindow):
     def print_times(self, unit="s"):
         """Display the times measured for functions"""
         scale = 1
-        if unit == "ms":
+        if unit == "ms" or unit == "milliseconds":
             scale *= 1e3
         elif unit == "us" or unit == "microseconds":
             scale *= 1e6
         else:
             unit = "s"
         if self.dir_watcher: # this is None if dir_watcher isn't initiated
-            print("File copying event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("\nFile processing event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("Most recent idle time between events: %.4g "%(self.dir_watcher.event_handler.idle_t*scale)+unit)
             print("Image processing duration: %.4g "%(self.int_time*scale)+unit)
             print("Image plotting duration: %.4g "%(self.plot_time*scale)+unit)
+            print("File writing duration: %.4g "%(self.dir_watcher.event_handler.write_t*scale)+unit)
+            print("File copying duration: %.4g "%(self.dir_watcher.event_handler.copy_t*scale)+unit)
         else: 
             print("Initiate the directory watcher before testing timings")
 
