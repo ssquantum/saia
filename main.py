@@ -678,12 +678,14 @@ class main_window(QMainWindow):
                 new_stats.append(([str(atom_count) + ' : ' + str(empty_count), str(im_han.im_num),
                     atom_array, atom_array, atom_array,
                     str(loading_prob), str(loading_err)] + list(map(str, peak_stats)) + [str(int(im_han.thresh))]))
+
         # calculate correlations:  - assuming only two atoms!
         if new_stats and len(new_stats[0]) == len(self.histo_handler[0].headers):
             no_atom, only_1, only_2, both = self.get_correlation(new_stats[0][2], new_stats[1][2], out_type='str')
             new_stats[0][2], new_stats[1][2] = no_atom, no_atom # neither atom present
             new_stats[0][3], new_stats[1][3] = only_1,  only_2  # just one atom present
             new_stats[0][4], new_stats[1][4] = both,    both    # both atoms present
+
         self.update_stat_labels(new_stats)
         return new_stats
 
@@ -912,10 +914,11 @@ class main_window(QMainWindow):
         self.plot_time = time.time() - t2
 
     def add_stats_to_plot(self, toggle=True):
-        """Take the current histogram statistics from the Histogram Statistics labels
-        and add the values to the variable plot, saving the parameters to the log
-        file at the same time. If any of the labels are empty, do nothing and return -1"""
+        """Get the histogram statistics as strings from the labels and use the values
+        to update the values plotted on the varplot. Append the new statistics to the 
+        log file. If the labels are empty, return -1."""
         stats = self.get_stats() # get statistics from histogram statistics tab labels (list of strings)
+        hist_num = -1 # index for histograms. If there aren't any to update, 
 
         for i in range(len(stats)): # should loop over the atoms
             if not any([s == '' for s in stats[i]]): # only add stats if the fit is successful
@@ -990,9 +993,10 @@ class main_window(QMainWindow):
         The labels are: 'Counts above : below threshold', 'Number of images processed', 
         'Loading probability', 'Error in loading probability', Background peak count', 'Background peak width', 
         'Signal peak count', 'Signal peak width', 'Separation', 'Fidelity', 'Error in fidelity', 'Threshold'"""
-        for i in range(len(self.histo_handler)):
-            for ii, label in enumerate(['Counts above : below threshold']+list(self.histo_handler[i].headers[1:])):
-                self.stat_labels[self.atomX[i]+label].setText(args[i][ii])
+        if np.size(args): # if args list is empty, do nothing
+            for i in range(len(self.histo_handler)):
+                for ii, label in enumerate(['Counts above : below threshold']+list(self.histo_handler[i].headers[1:])):
+                    self.stat_labels[self.atomX[i]+label].setText(args[i][ii])
 
 
     def get_stats(self):
