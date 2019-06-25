@@ -17,7 +17,7 @@ import time
 import shutil
 try:
     from PyQt4.QtCore import QThread, pyqtSignal, QEvent
-except ModuleNotFoundError:
+except ImportError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler

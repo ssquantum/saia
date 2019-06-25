@@ -33,7 +33,7 @@ try:
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QIntValidator, QComboBox, QMenu, QActionGroup, 
             QTabWidget, QVBoxLayout, QFont) 
-except ModuleNotFoundError:
+except ImportError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent
     from PyQt5.QtGui import (QGridLayout, QMessageBox, QLineEdit, QIcon, 
             QFileDialog, QDoubleValidator, QIntValidator, QComboBox, QMenu, 
