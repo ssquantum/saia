@@ -147,7 +147,11 @@ class image_handler:
         # the pixel value at the centre of the ROI
         self.mid_count[self.im_num] = full_im[self.xc, self.yc]
         # position of the (first) max intensity pixel
-        self.xc_list[self.im_num], self.yc_list[self.im_num] = np.argmax(full_im)
+        try:
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(full_im == np.max(full_im))
+        except ValueError: # same max value found in more than one position
+            xcs, ycs = np.where(full_im == np.max(full_im))
+            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
         
         self.im_num += 1
             
