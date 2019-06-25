@@ -45,7 +45,7 @@ class image_handler:
         self.delim = ' '                # delimieter to use when opening files
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts over the ROI
-        self.max_count = np.zeros(self.n)# maximum count in the image
+        self.mid_count = np.zeros(self.n)# count at the centre of the ROI
         self.peak_indexes = [0,0]       # indexes of peaks in histogram
         self.peak_heights = [0,0]       # heights of peaks in histogram
         self.peak_widths  = [0,0]       # widths of peaks in histogram
@@ -77,7 +77,7 @@ class image_handler:
         """Reset all of the histogram array data to zero"""
         self.files = np.array([None]*(self.n)) # labels of files. 
         self.counts = np.zeros(self.n)  # integrated counts over ROI
-        self.max_count = np.zeros(self.n)  # max count in the image
+        self.mid_count = np.zeros(self.n)  # max count in the image
         self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
         self.std_count = np.zeros(self.n)  # list of standard deviation of counts in image
         self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
@@ -102,7 +102,7 @@ class image_handler:
             # filled the array of size n so add more elements
             if self.im_num % (self.n - 10) == 0 and self.im_num > self.n / 2:
                 self.counts = np.append(self.counts, np.zeros(self.n))
-                self.max_count = np.append(self.max_count, np.zeros(self.n))
+                self.mid_count = np.append(self.mid_count, np.zeros(self.n))
                 self.mean_count = np.append(self.mean_count, np.zeros(self.n)) 
                 self.std_count = np.append(self.std_count, np.zeros(self.n))
                 self.xc_list = np.append(self.xc_list, np.zeros(self.n))
@@ -144,13 +144,10 @@ class image_handler:
         # naming convention: [Species]_[date]_[Dexter file #]
         self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
 
-        # find the max pixel and record its position
-        self.max_count[self.im_num] = np.max(full_im)
-        try:
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = np.where(full_im == np.max(full_im))
-        except ValueError: # same max value found in more than one position
-            xcs, ycs = np.where(full_im == np.max(full_im))
-            self.xc_list[self.im_num], self.yc_list[self.im_num] = xcs[0], ycs[0]
+        # the pixel value at the centre of the ROI
+        self.mid_count[self.im_num] = full_im[self.xc, self.yc]
+        # position of the (first) max intensity pixel
+        self.xc_list[self.im_num], self.yc_list[self.im_num] = np.argmax(full_im)
         
         self.im_num += 1
             
@@ -294,10 +291,10 @@ class image_handler:
         self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
         self.atom = np.concatenate((self.atom[:self.im_num], data[:,i+2], np.zeros(self.n)))
         if 'Max Count' in header:
-            self.max_count = np.concatenate((self.max_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
+            self.mid_count = np.concatenate((self.mid_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
             i += 4
         else: # retain compatability with older csv files that don't contain max count
-            self.max_count = np.concatenate((self.max_count[:self.im_num], np.zeros(self.n + np.size(data[:,i]))))
+            self.mid_count = np.concatenate((self.mid_count[:self.im_num], np.zeros(self.n + np.size(data[:,i]))))
             i += 3
         self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,i], np.zeros(self.n)))
         self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,i+1], np.zeros(self.n)))
@@ -312,12 +309,12 @@ class image_handler:
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
         
         out_arr = np.array((self.files[:self.im_num], self.counts[:self.im_num], 
-            self.atom[:self.im_num], self.max_count[:self.im_num], self.xc_list[:self.im_num], 
+            self.atom[:self.im_num], self.mid_count[:self.im_num], self.xc_list[:self.im_num], 
             self.yc_list[:self.im_num], self.mean_count[:self.im_num],
             self.std_count[:self.im_num])).T
                     
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
-                header='File, Counts, Atom Detected (threshold=%s), Max Count, X-pos (pix), Y-pos (pix), Mean Count, s.d.'
+                header='File, Counts, Atom Detected (threshold=%s), ROI Centre Count, X-pos (max pix), Y-pos (max pix), Mean Count, s.d.'
                 %int(self.thresh))
 
 ####    ####    ####    ####

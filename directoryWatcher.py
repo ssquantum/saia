@@ -113,7 +113,7 @@ class system_event_handler(FileSystemEventHandler, QThread):
 # setup up a watcher to detect changes in the image read directory
 class dir_watcher(QThread):
     """Watches a directory to detect changes in the files present"""
-    def __init__(self):
+    def __init__(self, config_file = './config.dat'):
         super().__init__()
         
         # load paths used from config.dat
@@ -122,37 +122,37 @@ class dir_watcher(QThread):
         self.dirs_dict = {key:value for (key, value) in 
                         np.array([path_label_text, self.get_dirs()]).T}  # handy list contains them all
         (self.image_storage_path, self.log_file_path, self.dexter_sync_file_name, 
-                    self.image_read_path, self.results_path) = self.get_dirs()
-        
-        # create the watchdog object
-        self.observer = Observer()
-        
-        # get the date to be used for file labeling
-        self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
-        self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
-        
-        self.event_handler = system_event_handler(self.image_storage_path, 
-                                self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
-        
-        # create image storage directory by date if it doesn't already exist
-        os.makedirs(self.image_storage_path, exist_ok=True) # requies version > 3.2
-        
-        # initiate observer
-        self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
-        self.observer.start()
+                    self.image_read_path, self.results_path) = self.get_dirs(config_file)
+
+        if self.image_storage_path: # =0 if get_dirs couldn't find config.dat, else continue
+            # create the watchdog object
+            self.observer = Observer()
+            
+            # get the date to be used for file labeling
+            self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
+            self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
+            
+            self.event_handler = system_event_handler(self.image_storage_path, 
+                                    self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
+            
+            # create image storage directory by date if it doesn't already exist
+            os.makedirs(self.image_storage_path, exist_ok=True) # requies version > 3.2
+            
+            # initiate observer
+            self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
+            self.observer.start()
     
     @staticmethod # static method can be accessed without making an instance of the class
-    def get_dirs():
+    def get_dirs(config_file = './config.dat'):
         """Load the paths used from the config.dat file or prompt user if 
         it can't be found"""
         # load config file for directories or prompt user if first time setup
         try:
-            with open('./config.dat', 'r') as config_file:
+            with open(config_file, 'r') as config_file:
                 config_data = config_file.read().split("\n")
         except FileNotFoundError:
             print("config.dat file not found. This file is required for directory references.")
-            with open(input('Please supply the absolute path to config.dat\t\t'), 'r') as config_file:
-                config_data = config_file.read().split("\n")
+            return (0, 0, 0, 0, 0)
                 
         for row in config_data:
             if "image storage path" in row:
@@ -184,7 +184,7 @@ class dir_watcher(QThread):
     def run(self):
         pass
         
-    def save_config(self):
-        with open('./config.dat', 'w+') as config_file:
+    def save_config(self, config_file='./config.dat'):
+        with open(config_file, 'w+') as config_file:
             config_file.write(self.print_dirs(*[d for d in self.dirs_dict.values()]))
   

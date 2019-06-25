@@ -68,7 +68,7 @@ class main_window(QMainWindow):
     def init_log(self):
         """Create a directory for today's date as a subdirectory in the log file path
         then write the header to the log file path defined in config.dat"""
-        dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
+        dir_watcher_dirs = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
         # make subdirectory if it doesn't already exist
         log_file_dir = dir_watcher_dirs[1]+'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0]) 
         try:
@@ -210,31 +210,38 @@ class main_window(QMainWindow):
         self.roi_l_edit.textEdited[str].connect(self.roi_text_edit)
         self.roi_l_edit.setValidator(int_validator) # only numbers
         
-        # change paths used for directory watcher
-        path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
+        # change paths used for directory watcher by reloading config file:
+        config_label = QLabel('Config File: ')
+        settings_grid.addWidget(config_label, 4,0, 1,1)
+        self.config_edit = QLineEdit(self)
+        settings_grid.addWidget(self.config_edit, 4,1, 1,1)
+        self.config_edit.setText('./config.dat')
+        self.config_edit.editingFinished.connect(self.path_text_edit)
+
+
+        # show paths from the current config file
+        self.path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
                 'Dexter Sync File: ', 'Image Read Path: ', 'Results Path: ']
-        self.path_label_edits = []
-        for i in range(len(path_label_text)):
-            new_label = QLabel(path_label_text[i], self)
-            settings_grid.addWidget(new_label, i+4,0, 1,1)
-            self.path_label_edits.append(QLineEdit(self))
-            self.path_label_edits[i].setObjectName(path_label_text[i])
-            settings_grid.addWidget(self.path_label_edits[i], i+4,1, 1,1)
-            self.path_label_edits[i].returnPressed.connect(self.path_text_edit)
+        self.path_label = {}
+        for i in range(len(self.path_label_text)):
+            new_label = QLabel(self.path_label_text[i], self)
+            settings_grid.addWidget(new_label, i+5,0, 1,1)
+            self.path_label[self.path_label_text[i]] = QLabel('', self)
+            settings_grid.addWidget(self.path_label[self.path_label_text[i]], i+5,1, 1,1)
         
         # button to initiate dir watcher
         self.dw_init_button = QPushButton('Initiate directory watcher', self)
         self.dw_init_button.clicked.connect(self.reset_DW) # function to start/stop dir watcher
         self.dw_init_button.resize(self.dw_init_button.sizeHint())
-        settings_grid.addWidget(self.dw_init_button, i+5,0, 1,1)
+        settings_grid.addWidget(self.dw_init_button, i+6,0, 1,1)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
-        settings_grid.addWidget(self.dw_status_label, i+5,1, 1,1)
+        settings_grid.addWidget(self.dw_status_label, i+6,1, 1,1)
 
         # label to show last file analysed
         self.recent_label = QLabel('', self)
-        settings_grid.addWidget(self.recent_label, i+6,0, 1,4)
+        settings_grid.addWidget(self.recent_label, i+7,0, 1,4)
         
 
         #### tab for histogram ####
@@ -410,8 +417,8 @@ class main_window(QMainWindow):
 
     def init_DW(self):
         """Ask the user if they want to start the dir watcher or not"""
-        dir_watcher_dirs = dw.dir_watcher.get_dirs() # static method
-        text = "Loaded from config.dat:\n"
+        dir_watcher_dirs = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
+        text = "Loaded from config file:\n"
         text += dw.dir_watcher.print_dirs(*dir_watcher_dirs) # static method
         text += "\nStart the directory watcher with these settings?"
         reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
@@ -452,7 +459,7 @@ class main_window(QMainWindow):
 
         else: 
             # prompt user if they want to remove image files 
-            self.dir_watcher = dw.dir_watcher() # instantiate dir watcher
+            self.dir_watcher = dw.dir_watcher(self.config_edit.text()) # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
             self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number
@@ -475,47 +482,20 @@ class main_window(QMainWindow):
             self.setWindowTitle('Single Atom Image Analyser --- ' + date_str)
 
             # set current file paths
-            for i, label in enumerate(self.dir_watcher.dirs_dict.values()):
-                self.path_label_edits[i].setText(label)
+            for key, value in self.dir_watcher.dirs_dict.items():
+                self.path_label[key].setText(value)
 
                 
     #### #### user input functions #### #### 
 
     def path_text_edit(self, text=''):
         """The user finishes editing an edit text box by pressing return or clicking
-        somewhere else, then the text is sent to this function to update the dir
-        watcher's paths. It is the system event handler that processes file 
-        creation events, so its paths must be updated. For consistency the dir 
-        watcher's paths are also updated."""
-        if self.dir_watcher:
-            sender = self.sender()
-            
-            for i, label in enumerate(self.dir_watcher.dirs_dict):
-                if i == 0 and label in sender.objectName(): # image storage path
-                    new_image_storage_path = sender.text() + r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
-                    # create image storage directory by date if it doesn't already exist
-                    os.makedirs(new_image_storage_path, exist_ok=True) # requies Python version > 3.2
-                    self.dir_watcher.event_handler.image_storage_path = new_image_storage_path # saves files
-                    self.dir_watcher.image_storage_path = new_image_storage_path # for consistency
-                    
-                elif i == 1 and label in sender.objectName(): # log file path
-                    self.dir_watcher.log_file_path = sender.text()
-
-                elif i == 2 and label in sender.objectName(): # dexter sync file
-                    self.dir_watcher.event_handler.dexter_sync_file_name = sender.text() # checks current file
-                    self.dir_watcher.dexter_sync_file_name = sender.text() # for consistency
-
-                elif i == 3 and label in sender.objectName(): # image read path
-                    for path_edit in self.path_label_edits:
-                        self.dir_watcher.dirs_dict[path_edit.objectName()] = path_edit.text()
-                    self.dir_watcher.save_config()  # update the config file
-                    self.reset_DW()  # stop the dir watcher
-                    self.init_DW()   # prompt user to restart the dir watcher with new config
-                    break # the loop can't continue if the dir watcher has been deleted
-
-                elif i == 4 and label in sender.objectName(): # results path
-                    self.dir_watcher.results_path = sender.text()
-            
+        somewhere else, then the text is sent to this function to reload the config file. 
+        The dir watcher is not updated unless the 'initiate dir watcher' button is used."""
+        dw_paths = dw.dir_watcher.get_dirs(self.config_edit.text())
+        for i in range(len(self.path_label_text)):
+            self.path_label[self.path_label_text[i]].setText(dw_paths[i])
+        
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""
