@@ -19,7 +19,8 @@ Results path		The default location to open the file browser for saving csv files
 		○ The 'Get ROI from image' will set the image size and then centre the ROI on the pixel with maximum intensity
 		
 	• There are several running modes:
-		○ Directory watcher (real time processing of images straight after the file is saved to the image read path)
+		○ Active directory watcher (real time processing of images straight after the file is saved to the image read path. Copies then deletes images)
+		○ Passive directory watcher (real time processing of images straight after the file is saved to the image read path. Doesn't alter the file)
 		○ Load data from csv (the format is: file#, counts, atom detected?, max count, pixel x position, pixel y position, mean count, standard deviation)
 		○ Load data from a selection of image files
 		
@@ -48,7 +49,7 @@ Results structure
 File #				Taken from currentfile.txt
 Integrated counts in ROI	User sets ROI, sum the counts in all of the pixels
 Atom detected			Counts // threshold. This is greater than zero if an atom is detected
-Max count			Search for the maximum value in the loaded image array
+Mid count			the count in the pixel at the centre of the ROI
 xc				x-position of max count (in pixels)
 yc				y-position of max count (in pixels)
 Mean count			Take the mean of the image outside of the ROI to estimate background
