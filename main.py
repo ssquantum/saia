@@ -234,9 +234,14 @@ class main_window(QMainWindow):
         self.dw_init_button.resize(self.dw_init_button.sizeHint())
         settings_grid.addWidget(self.dw_init_button, i+5,0, 1,1)
 
+        # toggle to choose whether the dir watcher is active or passive
+        self.dw_toggle = QPushButton('Active', self, checkable=True, checked=True)
+        self.dw_toggle.clicked[bool].connect(self.dw_toggle_switch)
+        settings_grid.addWidget(self.dw_toggle, i+5,1, 1,1)
+
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
-        settings_grid.addWidget(self.dw_status_label, i+5,1, 1,1)
+        settings_grid.addWidget(self.dw_status_label, i+5,2, 1,1)
 
         # label to show last file analysed
         self.recent_label = QLabel('', self)
@@ -426,6 +431,14 @@ class main_window(QMainWindow):
         if reply == QMessageBox.Yes:
             for file_name in file_list:
                 os.remove(os.path.join(self.dir_watcher.image_read_path, file_name))
+
+    def dw_toggle_switch(self):
+        """Change the dw_toggle switch so that when in active mode it reads active,
+        when in passive mode it reads passive"""
+        if self.dw_toggle.isChecked():
+            self.dw_toggle.setText('Active')
+        else:
+            self.dw_toggle.setText('Passive')
             
     def reset_DW(self):
         """Initiate the dir watcher. If there is already one running, stop the 
@@ -441,7 +454,7 @@ class main_window(QMainWindow):
 
         else: 
             # prompt user if they want to remove image files 
-            self.dir_watcher = dw.dir_watcher() # instantiate dir watcher
+            self.dir_watcher = dw.dir_watcher(active=self.dw_toggle.isChecked()) # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
             self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number

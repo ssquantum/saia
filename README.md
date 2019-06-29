@@ -1,5 +1,5 @@
-﻿**** Version 2.1 ****
-Produces histograms for two independent regions of interest corresponding to two different tweezers.
+﻿**** Version 1.1 ****
+Produces histograms for an image containing a either single atom or none.
 **** ****
 
 How to run Single Atom Image Analysis (SAIA):

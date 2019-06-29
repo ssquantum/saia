@@ -109,12 +109,41 @@ class system_event_handler(FileSystemEventHandler, QThread):
         self.end_t = time.time()       # time at end of current event
         self.event_t = self.end_t - t0 # duration of event
         
-####    ####    ####    ####        
+####    ####    ####    ####   
+
+# set up a separate event handler that reads in new files but doesn't copy or delete
+class silent_event_handler(system_event_handler):
+    """The event handler responds to file creation events and emits the path
+    to the file as a signal. This silent event handler does not copy or delete
+    files, merely emit the event path."""
+    event_path = pyqtSignal(str)
     
+    def __init__(self, image_storage_path, dexter_sync_file_name, date):
+        # same init as the base system event handler
+        system_event_handler.__init__(self, image_storage_path, dexter_sync_file_name, date)   
+    
+    def on_created(self, event):
+        """On a new image being written, save the file with a synced label into the 
+        image storage dir"""
+        t0 = time.time()
+        self.idle_t = t0 - self.end_t # duration between end of last event and start of current event
+        
+        self.wait_for_file(event.src_path) # wait until file has been written        
+        self.write_t = time.time() - t0
+
+        self.last_event_path = event.src_path  # update last event path
+        self.event_path.emit(event.src_path)  # emit signal
+        
+        self.end_t = time.time()       # time at end of current event
+        self.event_t = self.end_t - t0 # duration of event
+
+
+####    ####    ####    ####   
+        
 # setup up a watcher to detect changes in the image read directory
 class dir_watcher(QThread):
     """Watches a directory to detect changes in the files present"""
-    def __init__(self):
+    def __init__(self, active=True):
         super().__init__()
         
         # load paths used from config.dat
@@ -132,7 +161,11 @@ class dir_watcher(QThread):
         self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
         self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
         
-        self.event_handler = system_event_handler(self.image_storage_path, 
+        if active: # active event handler copies then deletes new files
+            self.event_handler = system_event_handler(self.image_storage_path, 
+                                self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
+        else: # passive event handler just emits the event path
+            self.event_handler = silent_event_handler(self.image_storage_path, 
                                 self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
         
         # create image storage directory by date if it doesn't already exist
