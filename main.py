@@ -238,11 +238,11 @@ class main_window(QMainWindow):
         # toggle to choose whether the dir watcher is active or passive
         self.dw_toggle = QPushButton('Active', self, checkable=True, checked=True)
         self.dw_toggle.clicked[bool].connect(self.dw_toggle_switch)
-        settings_grid.addWidget(self.dw_toggle, i+5,1, 1,1)
+        settings_grid.addWidget(self.dw_toggle, i+6,1, 1,1)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
-        settings_grid.addWidget(self.dw_status_label, i+5,2, 1,1)
+        settings_grid.addWidget(self.dw_status_label, i+6,2, 1,1)
 
         # label to show last file analysed
         self.recent_label = QLabel('', self)
@@ -471,7 +471,7 @@ class main_window(QMainWindow):
             self.recent_label.setText('')
 
         else: 
-            # prompt user if they want to remove image files 
+            # prompt user if they want to remove image files
             self.dir_watcher = dw.dir_watcher(config_file=self.config_edit.text(),
                                     active=self.dw_toggle.isChecked()) # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
@@ -507,9 +507,12 @@ class main_window(QMainWindow):
         somewhere else, then the text is sent to this function to reload the config file. 
         The dir watcher is not updated unless the 'initiate dir watcher' button is used."""
         dw_paths = dw.dir_watcher.get_dirs(self.config_edit.text())
-        for i in range(len(self.path_label_text)):
-            self.path_label[self.path_label_text[i]].setText(dw_paths[i])
-        
+        if dw_paths[0]:
+            for i in range(len(self.path_label_text)):
+                self.path_label[self.path_label_text[i]].setText(dw_paths[i])
+        else:
+            for p in self.path_label_text:
+                self.path_label[p].setText('')
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""

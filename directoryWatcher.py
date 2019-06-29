@@ -141,14 +141,14 @@ class silent_event_handler(system_event_handler):
 # setup up a watcher to detect changes in the image read directory
 class dir_watcher(QThread):
     """Watches a directory to detect changes in the files present"""
-    def __init__(self, config_file = './config.dat', active=True):
+    def __init__(self, config_file='./config.dat', active=True):
         super().__init__()
         
         # load paths used from config.dat
         path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
                 'Dexter Sync File: ', 'Image Read Path: ', 'Results Path: ']
         self.dirs_dict = {key:value for (key, value) in 
-                        np.array([path_label_text, self.get_dirs()]).T}  # handy list contains them all
+                        np.array([path_label_text, self.get_dirs(config_file)]).T}  # handy list contains them all
         (self.image_storage_path, self.log_file_path, self.dexter_sync_file_name, 
                     self.image_read_path, self.results_path) = self.get_dirs(config_file)
 
@@ -161,7 +161,7 @@ class dir_watcher(QThread):
             self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
             
             if active: # active event handler copies then deletes new files
-            self.event_handler = system_event_handler(self.image_storage_path, 
+                self.event_handler = system_event_handler(self.image_storage_path, 
                                 self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
             else: # passive event handler just emits the event path
                 self.event_handler = silent_event_handler(self.image_storage_path, 
@@ -175,7 +175,7 @@ class dir_watcher(QThread):
             self.observer.start()
     
     @staticmethod # static method can be accessed without making an instance of the class
-    def get_dirs(config_file = './config.dat'):
+    def get_dirs(config_file='./config.dat'):
         """Load the paths used from the config.dat file or prompt user if 
         it can't be found"""
         # load config file for directories or prompt user if first time setup
