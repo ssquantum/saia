@@ -145,12 +145,12 @@ class dir_watcher(QThread):
         super().__init__()
         
         # load paths used from config.dat
-        path_label_text = ['Image Storage Path: ', 'Log File Path: ', 
-                'Dexter Sync File: ', 'Image Read Path: ', 'Results Path: ']
-        self.dirs_dict = {key:value for (key, value) in 
-                        np.array([path_label_text, self.get_dirs(config_file)]).T}  # handy list contains them all
-        (self.image_storage_path, self.log_file_path, self.dexter_sync_file_name, 
-                    self.image_read_path, self.results_path) = self.get_dirs(config_file)
+        self.dirs_dict = self.get_dirs(config_file)  # handy dict contains them all
+        self.image_storage_path = self.dirs_dict['Image Storage Path: ']
+        self.log_file_path = self.dirs_dict['Log File Path: ']
+        self.dexter_sync_file_name = self.dirs_dict['Dexter Sync File: ']
+        self.image_read_path = self.dirs_dict['Image Read Path: ']
+        self.results_path = self.dirs_dict['Results Path: ']
 
         if self.image_storage_path: # =0 if get_dirs couldn't find config.dat, else continue
             # create the watchdog object
@@ -184,7 +184,8 @@ class dir_watcher(QThread):
                 config_data = config_file.read().split("\n")
         except FileNotFoundError:
             print("config.dat file not found. This file is required for directory references.")
-            return (0, 0, 0, 0, 0)
+            return {'Image Storage Path: ':'', 'Log File Path: ':'', 'Dexter Sync File: ':'', 
+                    'Image Read Path: ':'', 'Results Path: ':''}
                 
         for row in config_data:
             if "image storage path" in row:
@@ -200,17 +201,17 @@ class dir_watcher(QThread):
                 
         if os.path.split(dexter_sync_file_name)[0] == image_read_path:
             print("WARNING: The directory watcher acts on all file change events, so the Dexter sync file path and image read path must be different.")
-        return [image_storage_path, log_file_path, dexter_sync_file_name, image_read_path, results_path]
+        return {'Image Storage Path: ':image_storage_path, 'Log File Path: ':log_file_path, 
+                'Dexter Sync File: ':dexter_sync_file_name, 'Image Read Path: ':image_read_path, 
+                'Results Path: ':results_path}
         
     @staticmethod
-    def print_dirs(image_storage_path, log_file_path, dexter_sync_file_name, image_read_path, results_path):
-        """Return a string containing information on the paths used"""
+    def print_dirs(dict_items):
+        """Return a string containing information on the paths used
+        dict_items should be the dirs_dict {key:value} dictionary."""
         outstr = '// list of required directories for SAIA\n'
-        outstr += 'image storage path\t--'+image_storage_path+'\n'
-        outstr += 'log file path\t\t--'+log_file_path+'\n'
-        outstr += 'dexter sync file\t\t--'+dexter_sync_file_name+'\n'
-        outstr += 'image read path\t--'+image_read_path+'\n'
-        outstr += 'results path\t\t--'+results_path+'\n'
+        for key, value in dict_items:
+            outstr += key + '\t\t' + value + '\n'
         return outstr
     
     def run(self):

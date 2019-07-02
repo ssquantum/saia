@@ -68,9 +68,9 @@ class main_window(QMainWindow):
     def init_log(self):
         """Create a directory for today's date as a subdirectory in the log file path
         then write the header to the log file path defined in config.dat"""
-        dir_watcher_dirs = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
+        dir_watcher_dict = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
         # make subdirectory if it doesn't already exist
-        log_file_dir = dir_watcher_dirs[1]+'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0]) 
+        log_file_dir = dir_watcher_dict['Log File Path: ']+'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0]) 
         try:
             os.makedirs(log_file_dir, exist_ok=True)
         except PermissionError:  # couldn't access the path, start a log file here
@@ -422,9 +422,9 @@ class main_window(QMainWindow):
 
     def init_DW(self):
         """Ask the user if they want to start the dir watcher or not"""
-        dir_watcher_dirs = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
+        dir_watcher_dict = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
         text = "Loaded from config file:\n"
-        text += dw.dir_watcher.print_dirs(*dir_watcher_dirs) # static method
+        text += dw.dir_watcher.print_dirs(dir_watcher_dict.items()) # static method
         text += "\nStart the directory watcher with these settings?"
         reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
             text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -488,7 +488,7 @@ class main_window(QMainWindow):
             msg.setIcon(QMessageBox.Information)
             msg.setText("Directory Watcher initiated with settings:\n"+
                 "date\t\t\t--" + date_str + "\n"+
-                self.dir_watcher.print_dirs(*[d for d in self.dir_watcher.dirs_dict.values()]))
+                self.dir_watcher.print_dirs(self.dir_watcher.dirs_dict.items()))
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             self.dw_init_button.setText('Stop directory watcher') # turns off
@@ -506,13 +506,9 @@ class main_window(QMainWindow):
         """The user finishes editing an edit text box by pressing return or clicking
         somewhere else, then the text is sent to this function to reload the config file. 
         The dir watcher is not updated unless the 'initiate dir watcher' button is used."""
-        dw_paths = dw.dir_watcher.get_dirs(self.config_edit.text())
-        if dw_paths[0]:
-            for i in range(len(self.path_label_text)):
-                self.path_label[self.path_label_text[i]].setText(dw_paths[i])
-        else:
-            for p in self.path_label_text:
-                self.path_label[p].setText('')
+        dw_dict = dw.dir_watcher.get_dirs(self.config_edit.text())
+        for key, value in dw_dict.items():
+            self.path_label[key].setText(value)
     
     def user_roi(self, pos):
         """The user drags an ROI and this updates the ROI centre and width"""
