@@ -236,7 +236,8 @@ class main_window(QMainWindow):
         settings_grid.addWidget(self.dw_init_button, i+6,0, 1,1)
 
         # toggle to choose whether the dir watcher is active or passive
-        self.dw_toggle = QPushButton('Active', self, checkable=True, checked=True)
+        self.dw_toggle = QPushButton('Active', self, checkable=True)
+        self.dw_toggle.setChecked(True)
         self.dw_toggle.clicked[bool].connect(self.dw_toggle_switch)
         settings_grid.addWidget(self.dw_toggle, i+6,1, 1,1)
 
