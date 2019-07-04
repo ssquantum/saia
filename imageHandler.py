@@ -290,7 +290,7 @@ class image_handler:
         self.files = np.concatenate((self.files[:self.im_num], data[:,i], np.array([None]*self.n)))
         self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
         self.atom = np.concatenate((self.atom[:self.im_num], data[:,i+2], np.zeros(self.n)))
-        if 'Max Count' in header or 'ROI Centre Count':
+        if 'Max Count' in header or 'ROI Centre Count' in header:
             self.mid_count = np.concatenate((self.mid_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
             i += 4
         else: # retain compatability with older csv files that don't contain max count
