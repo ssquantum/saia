@@ -332,10 +332,15 @@ class main_window(QMainWindow):
         fit_update.clicked[bool].connect(self.update_fit)
         stat_grid.addWidget(fit_update, i+1,1, 1,1)
 
+        # do a Gaussian fit just to the background peak
+        fit_bg = QPushButton('Fit background', self)
+        fit_bg.clicked[bool].connect(self.update_bg_fit)
+        stat_grid.addWidget(fit_bg, i+1,2, 1,1)
+
         # quickly add the current histogram statistics to the plot
         add_to_plot = QPushButton('Add to plot', self)
         add_to_plot.clicked[bool].connect(self.add_stats_to_plot)
-        stat_grid.addWidget(add_to_plot, i+1,2, 1,1)
+        stat_grid.addWidget(add_to_plot, i+2,1, 1,1)
 
         #### tab for viewing images ####
         im_tab = QWidget()
@@ -442,8 +447,10 @@ class main_window(QMainWindow):
         file_list = []
         for file_name in os.listdir(self.dir_watcher.image_read_path):
             if '.asc' in file_name:
-                text += "\t - " + file_name + "\n"
                 file_list.append(file_name)
+                if len(file_list) < 10:
+                    text += "\t - " + file_name + "\n"
+        text += '(Total %s files found.)\n'%len(file_list)
 
         reply = QMessageBox.question(self, 'Remove Initial Image files?',
             text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -713,6 +720,50 @@ class main_window(QMainWindow):
             if new_stats: # fit_gaussians returns 0 if it fails
                 self.update_stat_labels(new_stats)
             
+    
+    
+    def fit_bg_gaussian(self):
+        """Assume that there is only one peak in the histogram as there is no single
+        atom signal. Fit a Gaussian to this peak."""
+        bins, occ, _ = self.image_handler.histogram()  # get histogram
+        bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
+        
+        # make a Gaussian fit to the peak
+        best_fit = fc.fit(bins[:-1]+bin_mid, occ)
+        try:
+            best_fit.estGaussParam()         # get estimate of parameters
+            # parameters are: amplitude, centre, e^2 width
+            best_fit.getBestFit(best_fit.gauss)    # get best fit parameters
+        except: return 0               # fit failed, do nothing
+
+        # update image handler's values for peak parameters
+        self.image_handler.peak_heights = np.array((best_fit.ps[0], 0))
+        self.image_handler.peak_counts = np.array((best_fit.ps[1], 0))
+        # e^2 width = 2 * sigma
+        self.image_handler.peak_widths = np.array((best_fit.ps[2]/2., 0))
+
+        self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
+        
+        xs = np.linspace(min(best_fit.x), max(best_fit.x), 100) # interpolate
+        self.hist_canvas.plot(xs, best_fit.gauss(xs, *best_fit.ps), pen='b') # plot best fit
+
+        # update atom statistics
+        self.image_handler.atom[:self.image_handler.im_num] = np.zeros(self.image_handler.im_num)   # update atom presence
+        n = str(self.image_handler.im_num) # number of images processed
+
+        # counts above : below threshold, images processed, loading probability, error in loading probability, 
+        # bg count, bg width, signal count, signal width, separation, fidelity, error in fidelity, threshold
+        # note: Gaussian beam waist is 2x standard deviation
+        return ['0 : ' + n, n, '', '', "%.0f"%best_fit.ps[1], "%.0f"%(best_fit.ps[2]/2.), 
+            '', '', '', '', '', str(int(self.image_handler.thresh))]
+    
+    def update_bg_fit(self):
+        """Update the histogram statistics when only the background peak has been
+        fitted so the threshold doesn't have to be updated"""
+        new_stats = self.fit_bg_gaussian()
+        if new_stats:
+            self.update_stat_labels(new_stats)
+
     
     def update_varplot_axes(self, label=''):
         """The user selects which variable they want to display on the plot
@@ -1006,9 +1057,11 @@ class main_window(QMainWindow):
             # don't update the threshold  - trust the user to have already set it
             # if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
             #     self.plot_current_hist(self.image_handler.hist_and_thresh)
-            self.image_handler.save_state(save_file_name) # save histogram
-            
             hist_num = self.add_stats_to_plot()
+
+            self.image_handler.save_state(save_file_name,
+                         hist_header=self.histo_handler.headers,
+                         hist_stats=[str(hist_num)] + self.get_stats()) # save histogram
             
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Information)

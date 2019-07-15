@@ -303,18 +303,25 @@ class image_handler:
         self.im_num += np.size(data[:,0]) # now we have filled this many extra columns.
 
         
-    def save_state(self, save_file_name):
+    def save_state(self, save_file_name, hist_header=None, hist_stats=None):
         """Save the processed data to csv"""
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
         
+        # histogram data
         out_arr = np.array((self.files[:self.im_num], self.counts[:self.im_num], 
             self.atom[:self.im_num], self.mid_count[:self.im_num], self.xc_list[:self.im_num], 
             self.yc_list[:self.im_num], self.mean_count[:self.im_num],
             self.std_count[:self.im_num])).T
                     
+        header = 'File, Counts, Atom Detected (threshold=%s), ROI Centre Count, X-pos (max pix), Y-pos (max pix), Mean Count, s.d.'
+        # if there is histogram data, add this in as well
+        if np.size(hist_header) > 1 and np.size(hist_stats) > 1:
+            header += '\n' + ','.join(hist_header)
+            header += '\n' + ','.join(list(map(str, hist_stats)))
+
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
-                header='File, Counts, Atom Detected (threshold=%s), ROI Centre Count, X-pos (max pix), Y-pos (max pix), Mean Count, s.d.'
+                header=header
                 %int(self.thresh))
 
 ####    ####    ####    ####
