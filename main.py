@@ -725,16 +725,19 @@ class main_window(QMainWindow):
     def fit_bg_gaussian(self):
         """Assume that there is only one peak in the histogram as there is no single
         atom signal. Fit a Gaussian to this peak."""
+        c = self.image_handler.counts[:self.image_handler.im_num] # integrated counts
         bins, occ, _ = self.image_handler.histogram()  # get histogram
         bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
         
         # make a Gaussian fit to the peak
         best_fit = fc.fit(bins[:-1]+bin_mid, occ)
         try:
-            best_fit.estGaussParam()         # get estimate of parameters
+            best_fit.estGaussParam()
             # parameters are: amplitude, centre, e^2 width
             best_fit.getBestFit(best_fit.gauss)    # get best fit parameters
         except: return 0               # fit failed, do nothing
+        # calculate peak, mean, and std dev from the data
+        best_fit.ps = [best_fit.ps[0], np.mean(c), np.std(c, ddof=1)*2]
 
         # update image handler's values for peak parameters
         self.image_handler.peak_heights = np.array((best_fit.ps[0], 0))
@@ -1059,8 +1062,9 @@ class main_window(QMainWindow):
             #     self.plot_current_hist(self.image_handler.hist_and_thresh)
             hist_num = self.add_stats_to_plot()
 
+            # include histogram stats as the top two lines of the header
             self.image_handler.save_state(save_file_name,
-                         hist_header=self.histo_handler.headers,
+                         hist_header=['Histogram'] + self.histo_handler.headers,
                          hist_stats=[str(hist_num)] + self.get_stats()) # save histogram
             
             msg = QMessageBox()
