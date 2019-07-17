@@ -1064,7 +1064,7 @@ class main_window(QMainWindow):
 
             # include histogram stats as the top two lines of the header
             self.image_handler.save_state(save_file_name,
-                         hist_header=['Histogram'] + self.histo_handler.headers,
+                         hist_header=['Histogram'] + list(self.histo_handler.headers),
                          hist_stats=[str(hist_num)] + self.get_stats()) # save histogram
             
             msg = QMessageBox()
