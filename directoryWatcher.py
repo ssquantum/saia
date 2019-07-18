@@ -211,7 +211,7 @@ class dir_watcher(QThread):
         dict_items should be the dirs_dict {key:value} dictionary."""
         outstr = '// list of required directories for SAIA\n'
         for key, value in dict_items:
-            outstr += key + '\t\t' + value + '\n'
+            outstr += key + '\n' + value + '\n'
         return outstr
     
     def run(self):

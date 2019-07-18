@@ -236,10 +236,10 @@ class main_window(QMainWindow):
         settings_grid.addWidget(self.dw_init_button, i+6,0, 1,1)
 
         # toggle to choose whether the dir watcher is active or passive
-        self.dw_toggle = QPushButton('Active', self, checkable=True)
-        self.dw_toggle.setChecked(True)
-        self.dw_toggle.clicked[bool].connect(self.dw_toggle_switch)
-        settings_grid.addWidget(self.dw_toggle, i+6,1, 1,1)
+        self.dw_mode = QPushButton('Active', self, checkable=True)
+        self.dw_mode.setChecked(True)
+        self.dw_mode.clicked[bool].connect(self.dw_mode_switch)
+        settings_grid.addWidget(self.dw_mode, i+6,1, 1,1)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
@@ -410,9 +410,12 @@ class main_window(QMainWindow):
             self.plot_labels[i].addItems(self.histo_handler.headers) # add options
             # connect buttons to update functions
             self.plot_labels[i].activated[str].connect(self.update_varplot_axes)
+        # empty text box for the user to write their xlabel
+        self.plot_labels.append(QLineEdit(self))
         # position labels in grid
-        plot_grid.addWidget(self.plot_labels[0], 7,4, 1,1) # bottom middle
+        plot_grid.addWidget(self.plot_labels[0], 7,3, 1,1) # bottom middle
         plot_grid.addWidget(self.plot_labels[1], 2,0, 1,1) # middle left
+        plot_grid.addWidget(self.plot_labels[2], 7,4, 1,1) # bottom middle
 
         # button to clear plot data (it's still saved in the log file)
         clear_varplot = QPushButton('Clear plot', self)
@@ -458,13 +461,13 @@ class main_window(QMainWindow):
             for file_name in file_list:
                 os.remove(os.path.join(self.dir_watcher.image_read_path, file_name))
 
-    def dw_toggle_switch(self):
-        """Change the dw_toggle switch so that when in active mode it reads active,
+    def dw_mode_switch(self):
+        """Change the dw_mode switch so that when in active mode it reads active,
         when in passive mode it reads passive"""
-        if self.dw_toggle.isChecked():
-            self.dw_toggle.setText('Active')
+        if self.dw_mode.isChecked():
+            self.dw_mode.setText('Active')
         else:
-            self.dw_toggle.setText('Passive')
+            self.dw_mode.setText('Passive')
             
     def reset_DW(self):
         """Initiate the dir watcher. If there is already one running, stop the 
@@ -481,7 +484,7 @@ class main_window(QMainWindow):
         else: 
             # prompt user if they want to remove image files
             self.dir_watcher = dw.dir_watcher(config_file=self.config_edit.text(),
-                                    active=self.dw_toggle.isChecked()) # instantiate dir watcher
+                                    active=self.dw_mode.isChecked()) # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
             self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number
@@ -494,10 +497,11 @@ class main_window(QMainWindow):
 
             msg = QMessageBox() # pop up box to confirm it's started
             msg.setIcon(QMessageBox.Information)
-            msg.setText("Directory Watcher initiated with settings:\n"+
-                "date\t\t\t--" + date_str + "\n"+
+            msg.setText("Directory Watcher initiated in " + self.dw_mode.text() + 
+                " mode with settings:\n\n" + "date\t\t\t--" + date_str + "\n\n"+
                 self.dir_watcher.print_dirs(self.dir_watcher.dirs_dict.items()))
             msg.setStandardButtons(QMessageBox.Ok)
+            msg.setFixedSize(msg.sizeHint())
             msg.exec_()
             self.dw_init_button.setText('Stop directory watcher') # turns off
             # display current date on window title
