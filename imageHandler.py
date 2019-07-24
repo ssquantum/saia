@@ -323,7 +323,6 @@ class image_handler:
         header += 'File, Counts, Atom Detected (threshold=%s), ROI Centre Count, X-pos (max pix), Y-pos (max pix), Mean Count, s.d.'
 
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
-                header=header
-                %int(self.thresh))
+                header=header%int(self.thresh))
 
 ####    ####    ####    ####
