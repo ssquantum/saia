@@ -408,7 +408,7 @@ class main_window(QMainWindow):
         # x and y labels
         self.plot_labels = [QComboBox(self), QComboBox(self)]
         for i in range(len(self.plot_labels)):
-            self.plot_labels[i].addItems(self.histo_handler.stats_dict.keys()) # add options
+            self.plot_labels[i].addItems(list(self.histo_handler.stats_dict.keys())) # add options
             # connect buttons to update functions
             self.plot_labels[i].activated[str].connect(self.update_varplot_axes)
         # empty text box for the user to write their xlabel
