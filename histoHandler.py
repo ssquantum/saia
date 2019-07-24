@@ -5,33 +5,37 @@ a class to collect histogram statistics
 
 """
 import numpy as np
+from collections import OrderedDict
 
 class histo_handler:
     """Append histogram statistics to a list. These are defined in
-    a dictionary so that they can each be individually managed.
+    an ordered dictionary so that they can each be individually managed
+    and the labels retain the insertion order (to keep the values next to their
+    errors). A second dictionary allows for temporarily storing values
     """
     def __init__(self):
         # histogram statistics and variables for plotting:
-        self.stats_dict = {'Hist #':np.array([], dtype=int),
-        'Counts above : below threshold':np.array([], dtype=str),
-        'User variable':np.array([]),
-        'Number of images processed':np.array([], dtype=int), 
-        'Loading probability':np.array([]), 
-        'Error in Loading probability':np.array([]),
-        'Background peak count':np.array([], dtype=int), 
-        'Background peak Poissonian width':np.array([], dtype=int), 
-        'Background peak width':np.array([], dtype=int), 
-        'Background peak error':np.array([]), 
-        'Signal peak count':np.array([], dtype=int), 
-        'Signal peak Poissonian width':np.array([], dtype=int),
-        'Signal peak width':np.array([], dtype=int), 
-        'Signal peak error':np.array([]),
-        'Separation':np.array([]), 
-        'Fidelity':np.array([]), 
-        'Error in Fidelity':np.array([]), 
-        'Threshold':np.array([])}
+        self.stats_dict = OrderedDict([('Hist ID',np.array([], dtype=int)),
+        ('Counts above : below threshold',np.array([], dtype=str)),
+        ('User variable',np.array([], dtype=float)),
+        ('Number of images processed',np.array([], dtype=int)), 
+        ('Loading probability',np.array([], dtype=float)), 
+        ('Error in Loading probability',np.array([], dtype=float)),
+        ('Background peak count',np.array([], dtype=int)), 
+        ('Error in Background peak count',np.array([], dtype=float)), 
+        ('Background peak Poissonian width',np.array([], dtype=int)), 
+        ('Background peak width',np.array([], dtype=int)), 
+        ('Signal peak count',np.array([], dtype=int)), 
+        ('Error in Signal peak count',np.array([], dtype=float)),
+        ('Signal peak Poissonian width',np.array([], dtype=int)),
+        ('Signal peak width',np.array([], dtype=int)), 
+        ('Separation',np.array([], dtype=float)),
+        ('Error in Separation',np.array([], dtype=float)),
+        ('Fidelity',np.array([], dtype=float)), 
+        ('Error in Fidelity',np.array([], dtype=float)), 
+        ('Threshold',np.array([], dtype=float))])
         # variables that won't be saved for plotting:
-        self.temp_vals = {key:0 for key in self.stats_dict.keys()}
+        self.temp_vals = OrderedDict([(key,0) for key in self.stats_dict.keys()])
         self.xvals    = [] # variables to plot on the x axis
         self.yvals    = [] # variables to plot on the y axis
         
@@ -54,7 +58,7 @@ class histo_handler:
         header = header.replace('#', '').replace('loading', 'Loading'
                                         ).replace('fidelity', 'Fidelity')
         # make list
-        header = np.array(header.replace('Histogram', 'Hist #').split(', '))
+        header = np.array(header.replace('Histogram', 'Hist ID').split(', '))
 
         # get data
         if np.size(rows) < 4:
