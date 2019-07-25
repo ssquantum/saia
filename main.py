@@ -788,7 +788,9 @@ class main_window(QMainWindow):
     def fit_bg_gaussian(self, store_stats=False):
         """Assume that there is only one peak in the histogram as there is no single
         atom signal. Fit a Gaussian to this peak."""
-        c = self.image_handler.counts[:self.image_handler.im_num] # integrated counts
+        n = self.image_handler.im_num # number of images processed
+        c = self.image_handler.counts[:n] # integrated counts
+
         bins, occ, _ = self.image_handler.histogram()  # get histogram
         bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
         
@@ -796,23 +798,22 @@ class main_window(QMainWindow):
         best_fit = fc.fit(bins[:-1]+bin_mid, occ)
         try:
             best_fit.estGaussParam()
-            # parameters are: amplitude, centre, e^2 width
+            # parameters are: amplitude, centre, standard deviation
             best_fit.getBestFit(best_fit.gauss)    # get best fit parameters
         except: return 0               # fit failed, do nothing
-        # calculate peak, mean, and std dev from the data
-        best_fit.ps = [best_fit.ps[0], np.mean(c), np.std(c, ddof=1)]
+        # calculate mean and std dev from the data
+        mu, sig = np.mean(c), np.std(c, ddof=1)
+        best_fit.ps = [best_fit.ps[0], mu, sig] # use the peak from the fit
 
         # update image handler's values for peak parameters
         self.image_handler.peak_heights = np.array((best_fit.ps[0], 0))
-        self.image_handler.peak_counts = np.array((best_fit.ps[1], 0))
-        self.image_handler.peak_widths = np.array((best_fit.ps[2], 0))
+        self.image_handler.peak_counts = np.array((mu, 0))
+        self.image_handler.peak_widths = np.array((sig, 0))
 
         self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
         
         xs = np.linspace(min(best_fit.x), max(best_fit.x), 100) # interpolate
         self.hist_canvas.plot(xs, best_fit.gauss(xs, *best_fit.ps), pen='b') # plot best fit
-
-        n = self.image_handler.im_num # number of images processed
 
         # store the calculated histogram statistics as temp, don't add to plot
         self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
@@ -821,10 +822,10 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['Counts above : below threshold'] = '0 : ' + str(n)
         self.histo_handler.temp_vals['Loading probability'] = 0
         self.histo_handler.temp_vals['Error in Loading probability'] = 0
-        self.histo_handler.temp_vals['Background peak count'] = int(self.image_handler.peak_counts[0])
-        self.histo_handler.temp_vals['Background peak Poissonian width'] = int(self.image_handler.peak_counts[0]**0.5)
-        self.histo_handler.temp_vals['Background peak width'] = int(self.image_handler.peak_widths[0])
-        self.histo_handler.temp_vals['Error in Background peak count'] = np.around(self.image_handler.peak_widths[0] / n**0.5, 4)
+        self.histo_handler.temp_vals['Background peak count'] = int(mu)
+        self.histo_handler.temp_vals['Background peak Poissonian width'] = int(mu**0.5)
+        self.histo_handler.temp_vals['Background peak width'] = int(sig)
+        self.histo_handler.temp_vals['Error in Background peak count'] = np.around(sig / n**0.5, 4)
         self.histo_handler.temp_vals['Signal peak count'] = 0
         self.histo_handler.temp_vals['Signal peak Poissonian width'] = 0
         self.histo_handler.temp_vals['Signal peak width'] = 0
@@ -833,7 +834,7 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['Error in Separation'] = 0
         self.histo_handler.temp_vals['Fidelity'] = 0
         self.histo_handler.temp_vals['Error in Fidelity'] = 0
-        self.histo_handler.temp_vals['Threshold'] = self.image_handler.thresh
+        self.histo_handler.temp_vals['Threshold'] = int(self.image_handler.thresh)
 
         # display the new statistics in the labels
         for key, val in self.histo_handler.temp_vals.items():
@@ -860,8 +861,6 @@ class main_window(QMainWindow):
         or 'Background peak count' in y_label or 'Signal peak count' in y_label):
                     # add widget for errorbars
                     # estimate sensible beam width at the end of the errorbar
-                    print(self.histo_handler.stats_dict['Error in '+y_label])
-                    print(self.histo_handler.stats_dict['Error in '+y_label].dtype)
                     if np.size(self.histo_handler.xvals)//2:
                         beam_width = 0.1*(self.histo_handler.xvals[1]
                                                 - self.histo_handler.xvals[0])
