@@ -52,6 +52,8 @@ class main_window(QMainWindow):
     This GUI was produced with help from http://zetcode.com/gui/pyqt5/"""
     def __init__(self):
         super().__init__()
+        self.bias = 698.5 # bias off set from EMCCD
+        self.Nr   = 8.8   # read-out noise from EMCCD
         self.dir_watcher = None  # a button will initiate the dir watcher
         self.image_handler = ih.image_handler() # class to process images
         self.histo_handler = hh.histo_handler() # class to process histograms
@@ -210,12 +212,30 @@ class main_window(QMainWindow):
         self.roi_l_edit.setText('1')  # default
         self.roi_l_edit.textEdited[str].connect(self.roi_text_edit)
         self.roi_l_edit.setValidator(int_validator) # only numbers
+
+        # EMCCD bias offset
+        bias_offset_label = QLabel('EMCCD bias offset: ', self)
+        settings_grid.addWidget(bias_offset_label, 4,0, 1,1)
+        self.bias_offset_edit = QLineEdit(self)
+        settings_grid.addWidget(self.bias_offset_edit, 4,1, 1,1)
+        self.bias_offset_edit.setText(str(self.bias)) # default
+        self.bias_offset_edit.editingFinished.connect(self.CCD_stat_edit)
+        self.bias_offset_edit.setValidator(double_validator) # only floats
+
+        # EMCCD readout noise
+        read_noise_label = QLabel('EMCCD read-out noise: ', self)
+        settings_grid.addWidget(read_noise_label, 5,0, 1,1)
+        self.read_noise_edit = QLineEdit(self)
+        settings_grid.addWidget(self.read_noise_edit, 5,1, 1,1)
+        self.read_noise_edit.setText(str(self.Nr)) # default
+        self.read_noise_edit.editingFinished.connect(self.CCD_stat_edit)
+        self.read_noise_edit.setValidator(double_validator) # only floats
         
         # change paths used for directory watcher by reloading config file:
         config_label = QLabel('Config File: ')
-        settings_grid.addWidget(config_label, 4,0, 1,1)
+        settings_grid.addWidget(config_label, 6,0, 1,1)
         self.config_edit = QLineEdit(self)
-        settings_grid.addWidget(self.config_edit, 4,1, 1,1)
+        settings_grid.addWidget(self.config_edit, 6,1, 1,1)
         self.config_edit.setText('./config.dat')
         self.config_edit.editingFinished.connect(self.path_text_edit)
 
@@ -226,29 +246,29 @@ class main_window(QMainWindow):
         self.path_label = {}
         for i in range(len(self.path_label_text)):
             new_label = QLabel(self.path_label_text[i], self)
-            settings_grid.addWidget(new_label, i+5,0, 1,1)
+            settings_grid.addWidget(new_label, i+7,0, 1,1)
             self.path_label[self.path_label_text[i]] = QLabel('', self)
-            settings_grid.addWidget(self.path_label[self.path_label_text[i]], i+5,1, 1,1)
+            settings_grid.addWidget(self.path_label[self.path_label_text[i]], i+7,1, 1,1)
         
         # button to initiate dir watcher
         self.dw_init_button = QPushButton('Initiate directory watcher', self)
         self.dw_init_button.clicked.connect(self.reset_DW) # function to start/stop dir watcher
         self.dw_init_button.resize(self.dw_init_button.sizeHint())
-        settings_grid.addWidget(self.dw_init_button, i+6,0, 1,1)
+        settings_grid.addWidget(self.dw_init_button, i+8,0, 1,1)
 
         # toggle to choose whether the dir watcher is active or passive
         self.dw_mode = QPushButton('Active', self, checkable=True)
         self.dw_mode.setChecked(True)
         self.dw_mode.clicked[bool].connect(self.dw_mode_switch)
-        settings_grid.addWidget(self.dw_mode, i+6,1, 1,1)
+        settings_grid.addWidget(self.dw_mode, i+8,1, 1,1)
 
         # label to show status of dir watcher
         self.dw_status_label = QLabel('Stopped', self)  # should errors stop dir watcher???
-        settings_grid.addWidget(self.dw_status_label, i+6,2, 1,1)
+        settings_grid.addWidget(self.dw_status_label, i+8,2, 1,1)
 
         # label to show last file analysed
         self.recent_label = QLabel('', self)
-        settings_grid.addWidget(self.recent_label, i+7,0, 1,4)
+        settings_grid.addWidget(self.recent_label, i+9,0, 1,4)
         
 
         #### tab for histogram ####
@@ -559,6 +579,13 @@ class main_window(QMainWindow):
         edits the text in the line edit widget"""
         self.image_handler.pic_size = int(text)
         self.pic_size_label.setText(str(self.image_handler.pic_size))
+
+    def CCD_stat_edit(self):
+        """Update the values used for the EMCCD bias offset and readout noise"""
+        if self.bias_offset_edit.text(): # check the label isn't empty
+            self.bias = float(self.bias_offset_edit.text())
+        if self.read_noise_edit.text():
+            self.Nr = float(self.read_noise_edit.text())
         
     def roi_text_edit(self, text):
         """Update the ROI position and size every time a text edit is made by
@@ -665,11 +692,19 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['Error in Loading probability'] = np.around(conf[1] - conf[0], 4)
             if np.size(self.image_handler.peak_counts) == 2:
                 self.histo_handler.temp_vals['Background peak count'] = int(self.image_handler.peak_counts[0])
-                self.histo_handler.temp_vals['Background peak Poissonian width'] = int(self.image_handler.peak_counts[0]**0.5)
+                # assume bias offset is self.bias, readout noise standard deviation Nr
+                if self.Nr**2+self.image_handler.peak_counts[0]-self.bias > 0:
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+self.image_handler.peak_counts[0]-self.bias)**0.5)
+                else: # don't take the sqrt of a -ve number
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
                 self.histo_handler.temp_vals['Background peak width'] = int(self.image_handler.peak_widths[0])
                 self.histo_handler.temp_vals['Error in Background peak count'] = np.around(self.image_handler.peak_widths[0] / empty_count**0.5, 2)
                 self.histo_handler.temp_vals['Signal peak count'] = int(self.image_handler.peak_counts[1])
-                self.histo_handler.temp_vals['Signal peak Poissonian width'] = int(self.image_handler.peak_counts[1]**0.5)
+                # assume bias offset is self.bias, readout noise standard deviation Nr
+                if self.Nr**2+self.image_handler.peak_counts[1]-self.bias > 0:
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((self.Nr**2+self.image_handler.peak_counts[1]-self.bias)**0.5)
+                else: # don't take the sqrt of a -ve number
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
                 self.histo_handler.temp_vals['Signal peak width'] = int(self.image_handler.peak_widths[1])
                 self.histo_handler.temp_vals['Error in Signal peak count'] = np.around(self.image_handler.peak_widths[1] / atom_count**0.5, 2)
                 self.histo_handler.temp_vals['Separation'] = int(self.image_handler.peak_counts[1] - 
@@ -679,8 +714,8 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['Fidelity'] = self.image_handler.fidelity
                 self.histo_handler.temp_vals['Error in Fidelity'] = self.image_handler.err_fidelity
             else:
-                for key in ['Background peak count', 'Background peak Poissonian width', 'Background peak width', 
-                'Error in Background peak count', 'Signal peak count', 'Signal peak Poissonian width', 
+                for key in ['Background peak count', 'sqrt(Nr^2 + Nbg)', 'Background peak width', 
+                'Error in Background peak count', 'Signal peak count', 'sqrt(Nr^2 + Ns)', 
                 'Signal peak width', 'Error in Signal peak count', 'Separation', 'Fidelity', 'Error in Fidelity']:
                     self.histo_handler.temp_vals[key] = 0
 
@@ -747,11 +782,19 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['Loading probability'] = loading_prob
             self.histo_handler.temp_vals['Error in Loading probability'] = loading_err
             self.histo_handler.temp_vals['Background peak count'] = int(best_fits[0].ps[1])
-            self.histo_handler.temp_vals['Background peak Poissonian width'] = int(best_fits[0].ps[1]**0.5)
+            # assume bias offset is self.bias, readout noise standard deviation Nr
+            if self.Nr**2+best_fits[0].ps[1]-self.bias > 0:
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+best_fits[0].ps[1]-self.bias)**0.5)
+            else: # don't take the sqrt of a -ve number
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
             self.histo_handler.temp_vals['Background peak width'] = int(best_fits[0].ps[2])
             self.histo_handler.temp_vals['Error in Background peak count'] = np.around(best_fits[0].ps[2] / empty_count**0.5, 2)
             self.histo_handler.temp_vals['Signal peak count'] = int(best_fits[1].ps[1])
-            self.histo_handler.temp_vals['Signal peak Poissonian width'] = int(best_fits[1].ps[1]**0.5)
+            # assume bias offset is self.bias, readout noise standard deviation Nr
+            if self.Nr**2+best_fits[1].ps[1]-self.bias > 0:
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((self.Nr**2+best_fits[1].ps[1]-self.bias)**0.5)
+            else:
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
             self.histo_handler.temp_vals['Signal peak width'] = int(best_fits[1].ps[2])
             self.histo_handler.temp_vals['Error in Signal peak count'] = np.around(best_fits[1].ps[2] / atom_count**0.5, 2)
             self.histo_handler.temp_vals['Separation'] = int(best_fits[1].ps[1] - best_fits[0].ps[1])
@@ -823,11 +866,15 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['Loading probability'] = 0
         self.histo_handler.temp_vals['Error in Loading probability'] = 0
         self.histo_handler.temp_vals['Background peak count'] = int(mu)
-        self.histo_handler.temp_vals['Background peak Poissonian width'] = int(mu**0.5)
+        # assume bias offset is self.bias, readout noise standard deviation Nr
+        if self.Nr**2+mu-self.bias:
+            self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+mu-self.bias)**0.5)
+        else: # don't take the sqrt of a -ve number
+            self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
         self.histo_handler.temp_vals['Background peak width'] = int(sig)
         self.histo_handler.temp_vals['Error in Background peak count'] = np.around(sig / n**0.5, 4)
         self.histo_handler.temp_vals['Signal peak count'] = 0
-        self.histo_handler.temp_vals['Signal peak Poissonian width'] = 0
+        self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
         self.histo_handler.temp_vals['Signal peak width'] = 0
         self.histo_handler.temp_vals['Error in Signal peak count'] = 0
         self.histo_handler.temp_vals['Separation'] = 0
