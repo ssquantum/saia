@@ -678,8 +678,12 @@ class main_window(QMainWindow):
             else:
                 self.plot_current_hist(self.image_handler.hist_and_thresh) # update hist and get peak stats
 
-            atom_count = np.size(np.where(self.image_handler.atom > 0)[0])  # images with counts above threshold
-            empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0])
+            above_idxs = np.where(self.image_handler.atom > 0)[0] # index of images with counts above threshold
+            atom_count = np.size(above_idxs)  # number of images with counts above threshold
+            above = self.image_handler.counts[above_idxs] # counts above threshold
+            below_idxs = np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0] # index of images with counts below threshold
+            empty_count = np.size(below_idxs) # number of images with counts below threshold
+            below = self.image_handler.counts[below_idxs] # counts below threshold
             # use the binomial distribution to get 1 sigma confidence intervals:
             conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
 
@@ -699,6 +703,8 @@ class main_window(QMainWindow):
                     self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
                 self.histo_handler.temp_vals['Background peak width'] = int(self.image_handler.peak_widths[0])
                 self.histo_handler.temp_vals['Error in Background peak count'] = np.around(self.image_handler.peak_widths[0] / empty_count**0.5, 2)
+                self.histo_handler.temp_vals['Background mean'] = np.around(np.mean(below), 1)
+                self.histo_handler.temp_vals['Background standard deviation'] = np.around(np.std(below, ddof=1), 1)
                 self.histo_handler.temp_vals['Signal peak count'] = int(self.image_handler.peak_counts[1])
                 # assume bias offset is self.bias, readout noise standard deviation Nr
                 if self.Nr**2+self.image_handler.peak_counts[1]-self.bias > 0:
@@ -707,6 +713,8 @@ class main_window(QMainWindow):
                     self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
                 self.histo_handler.temp_vals['Signal peak width'] = int(self.image_handler.peak_widths[1])
                 self.histo_handler.temp_vals['Error in Signal peak count'] = np.around(self.image_handler.peak_widths[1] / atom_count**0.5, 2)
+                self.histo_handler.temp_vals['Signal mean'] = np.around(np.mean(above), 1)
+                self.histo_handler.temp_vals['Signal standard deviation'] = np.around(np.std(above, ddof=1), 1)
                 self.histo_handler.temp_vals['Separation'] = int(self.image_handler.peak_counts[1] - 
                                                                         self.image_handler.peak_counts[0])
                 self.histo_handler.temp_vals['Error in Separation'] = np.around(np.sqrt(self.image_handler.peak_widths[0]**2 / empty_count
@@ -766,8 +774,12 @@ class main_window(QMainWindow):
         # update atom statistics
         self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
             :self.image_handler.im_num] // self.image_handler.thresh   # update atom presence
-        atom_count = np.size(np.where(self.image_handler.atom > 0)[0]) # images with counts above threshold
-        empty_count = np.size(np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0]) # images with counts below threshold
+        above_idxs = np.where(self.image_handler.atom > 0)[0] # index of images with counts above threshold
+        atom_count = np.size(above_idxs)  # number of images with counts above threshold
+        above = self.image_handler.counts[above_idxs] # counts above threshold
+        below_idxs = np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0] # index of images with counts below threshold
+        empty_count = np.size(below_idxs) # number of images with counts below threshold
+        below = self.image_handler.counts[below_idxs] # counts below threshold
         loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
         # use the binomial distribution to get 1 sigma confidence intervals:
         conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
@@ -789,6 +801,8 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
             self.histo_handler.temp_vals['Background peak width'] = int(best_fits[0].ps[2])
             self.histo_handler.temp_vals['Error in Background peak count'] = np.around(best_fits[0].ps[2] / empty_count**0.5, 2)
+            self.histo_handler.temp_vals['Background mean'] = np.around(np.mean(below), 1)
+            self.histo_handler.temp_vals['Background standard deviation'] = np.around(np.std(below, ddof=1), 1)
             self.histo_handler.temp_vals['Signal peak count'] = int(best_fits[1].ps[1])
             # assume bias offset is self.bias, readout noise standard deviation Nr
             if self.Nr**2+best_fits[1].ps[1]-self.bias > 0:
@@ -797,6 +811,8 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
             self.histo_handler.temp_vals['Signal peak width'] = int(best_fits[1].ps[2])
             self.histo_handler.temp_vals['Error in Signal peak count'] = np.around(best_fits[1].ps[2] / atom_count**0.5, 2)
+            self.histo_handler.temp_vals['Signal mean'] = np.around(np.mean(above), 1)
+            self.histo_handler.temp_vals['Signal standard deviation'] = np.around(np.std(above, ddof=1), 1)
             self.histo_handler.temp_vals['Separation'] = int(best_fits[1].ps[1] - best_fits[0].ps[1])
             self.histo_handler.temp_vals['Error in Separation'] = np.around(np.sqrt(best_fits[0].ps[2]**2 / empty_count
                         + best_fits[1].ps[2]**2 / atom_count), 2)
@@ -846,12 +862,12 @@ class main_window(QMainWindow):
         except: return 0               # fit failed, do nothing
         # calculate mean and std dev from the data
         mu, sig = np.mean(c), np.std(c, ddof=1)
-        best_fit.ps = [best_fit.ps[0], mu, sig] # use the peak from the fit
+        # best_fit.ps = [best_fit.ps[0], mu, sig] # use the peak from the fit
 
         # update image handler's values for peak parameters
         self.image_handler.peak_heights = np.array((best_fit.ps[0], 0))
-        self.image_handler.peak_counts = np.array((mu, 0))
-        self.image_handler.peak_widths = np.array((sig, 0))
+        self.image_handler.peak_counts = np.array((best_fit.ps[1], 0))
+        self.image_handler.peak_widths = np.array((best_fit.ps[2], 0))
 
         self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
         
@@ -865,18 +881,22 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['Counts above : below threshold'] = '0 : ' + str(n)
         self.histo_handler.temp_vals['Loading probability'] = 0
         self.histo_handler.temp_vals['Error in Loading probability'] = 0
-        self.histo_handler.temp_vals['Background peak count'] = int(mu)
+        self.histo_handler.temp_vals['Background peak count'] = int(best_fit.ps[1])
         # assume bias offset is self.bias, readout noise standard deviation Nr
         if self.Nr**2+mu-self.bias:
             self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+mu-self.bias)**0.5)
         else: # don't take the sqrt of a -ve number
             self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
-        self.histo_handler.temp_vals['Background peak width'] = int(sig)
-        self.histo_handler.temp_vals['Error in Background peak count'] = np.around(sig / n**0.5, 4)
+        self.histo_handler.temp_vals['Background peak width'] = int(best_fit.ps[2])
+        self.histo_handler.temp_vals['Error in Background peak count'] = np.around(best_fit.ps[2] / n**0.5, 4)
+        self.histo_handler.temp_vals['Background mean'] = np.around(mu, 1)
+        self.histo_handler.temp_vals['Background standard deviation'] = np.around(sig, 1)
         self.histo_handler.temp_vals['Signal peak count'] = 0
         self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
         self.histo_handler.temp_vals['Signal peak width'] = 0
         self.histo_handler.temp_vals['Error in Signal peak count'] = 0
+        self.histo_handler.temp_vals['Signal mean'] = 0
+        self.histo_handler.temp_vals['Signal standard deviation'] = 0
         self.histo_handler.temp_vals['Separation'] = 0
         self.histo_handler.temp_vals['Error in Separation'] = 0
         self.histo_handler.temp_vals['Fidelity'] = 0
