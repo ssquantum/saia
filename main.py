@@ -52,7 +52,7 @@ class main_window(QMainWindow):
     This GUI was produced with help from http://zetcode.com/gui/pyqt5/"""
     def __init__(self):
         super().__init__()
-        self.bias = 698.5 # bias off set from EMCCD
+        self.bias = 697 # bias off set from EMCCD
         self.Nr   = 8.8   # read-out noise from EMCCD
         self.dir_watcher = None  # a button will initiate the dir watcher
         self.image_handler = ih.image_handler() # class to process images
@@ -442,6 +442,11 @@ class main_window(QMainWindow):
         clear_varplot = QPushButton('Clear plot', self)
         clear_varplot.clicked[bool].connect(self.clear_varplot)
         plot_grid.addWidget(clear_varplot, 7,0, 1,1)
+
+        # button to save plot data to separate file (it's also in the log file)
+        save_varplot = QPushButton('Save plot data', self)
+        save_varplot.clicked[bool].connect(self.save_varplot)
+        plot_grid.addWidget(save_varplot, 5,0, 1,1)
 
         #### choose main window position and dimensions: (xpos,ypos,width,height)
         self.setGeometry(100, 100, 850, 700)
@@ -1192,6 +1197,33 @@ class main_window(QMainWindow):
         except OSError:
             pass # user cancelled - file not found
 
+    def save_varplot(self):
+        """Save the data in the current plot, which is held in the histoHandler's
+        dictionary and saved in the log file, to a new file."""
+        default_path = self.get_default_path('log')
+        try:
+            if 'PyQt4' in sys.modules:
+                save_file_name = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'dat(*.dat);;all (*)')
+            elif 'PyQt5' in sys.modules:
+                save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'dat(*.dat);;all (*)')
+            
+            with open(save_file_name, 'w+') as f:
+                f.write('#Single Atom Image Analyser Log File: collects histogram data\n')
+                f.write('#include --[]\n')
+                f.write('#'+', '.join(self.histo_handler.stats_dict.keys())+'\n')
+                for i in range(len(self.histo_handler.stats_dict['Hist ID'])):
+                    f.write(','.join(list(map(str, [v[i] for v in 
+                        self.histo_handler.stats_dict.values()])))+'\n')
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("Plot data saved to file "+save_file_name)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+        except OSError:
+            pass # user cancelled - file not found
+
+        
     def check_reset(self):
         """Ask the user if they would like to reset the current data stored"""
         reply = QMessageBox.question(self, 'Confirm Data Replacement',
