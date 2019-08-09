@@ -36,7 +36,9 @@ class histo_handler:
         ('Separation',np.array([], dtype=float)),
         ('Error in Separation',np.array([], dtype=float)),
         ('Fidelity',np.array([], dtype=float)), 
-        ('Error in Fidelity',np.array([], dtype=float)), 
+        ('Error in Fidelity',np.array([], dtype=float)),
+        ('S/N',np.array([], dtype=float)),
+        ('Error in S/N',np.array([], dtype=float)),
         ('Threshold',np.array([], dtype=float))])
         # variables that won't be saved for plotting:
         self.temp_vals = OrderedDict([(key,0) for key in self.stats_dict.keys()])
@@ -80,3 +82,11 @@ class histo_handler:
                 self.stats_dict[key] = np.zeros(n, dtype=self.stats_dict[key].dtype)
         
         return 1 # success
+    
+    def sort_dict(self, lead='User variable'):
+        """Sort the arrays in the stats_dict such that they are all ordered 
+        with the item given by lead ascending.
+        lead: a key in the stats_dict that defines the item to sort by."""
+        idxs = np.argsort(self.stats_dict[lead])
+        for key in self.stats_dict.keys():
+            self.stats_dict[key] = self.stats_dict[key][idxs]
