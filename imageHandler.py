@@ -173,16 +173,20 @@ class image_handler:
         else:
             return -1, -1  # calculation failed
 
-    def search_fidelity(self, p1, p2, n=10):
-        """Take n values for the threshold between positions p1 and p2
+    def search_fidelity(self, p1, pw1, p2, n=10):
+        """Take n values for the threshold between positions p1 and 
+        p1 + 15*pw1 or p2, whichever is smaller.
         Calculate the threshold for each value and then take the max"""
-        threshes = np.linspace(p1, p2, n) # n points between peaks
+        uplim = min([p1 + 15*pw1, p2]) # highest possible value for the threshold 
+        threshes = np.linspace(p1, uplim, n) # n points between peaks
         fid, err_fid = 0, 0  # store the previous value of the fidelity
-        for thresh in threshes:
+        for thresh in threshes[1:]: # threshold should never be at the background peak p1
             f, fe = self.get_fidelity(thresh) # calculate fidelity for given threshold
             if f > fid:
                 fid, err_fid = f, fe
                 self.thresh = thresh # the threshold at which there is max fidelity
+                if fid > 0.9999:
+                    break
         
         # set to max value, round to 4 d.p.
         self.fidelity, self.err_fidelity = np.around([fid, err_fid] , 4)
@@ -191,12 +195,11 @@ class image_handler:
         """Make a histogram of the photon counts and determine a threshold for 
         single atom presence."""
         bins, occ, _ = self.histogram()
+        self.thresh = np.mean(bins) # in case peak calculation fails
 
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
-            # set the threshold 5 standard deviations above the background peak (1 in 1.7e6)
-            self.thresh = self.peak_counts[0] + 5 * self.peak_widths[0] # in case fidelity calculation fails
             # set the threshold where the fidelity is max
-            self.search_fidelity(self.peak_counts[0], self.peak_counts[1])
+            self.search_fidelity(self.peak_counts[0], self.peak_widths[0] ,self.peak_counts[1])
 
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
@@ -208,7 +211,12 @@ class image_handler:
         if np.size(self.bin_array) > 0: 
             occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
         else:
-            occ, bins = np.histogram(self.counts[:self.im_num]) # no bins provided, do automatic binning
+            if self.im_num:
+                lo, hi = min(self.counts[:self.im_num]), max(self.counts[:self.im_num])
+            else: lo, hi = 1,1
+            # scale number of bins with number of files in histogram and with separation of peaks
+            num_bins = int(17 + 5e-5 * self.im_num**2 + ((hi - lo)/hi)**2*20) 
+            occ, bins = np.histogram(self.counts[:self.im_num], bins=num_bins) # no bins provided by user
 
         # get the indexes of peak positions, heights, and widths
         self.peak_indexes, self.peak_heights, self.peak_widths = est_param(occ)

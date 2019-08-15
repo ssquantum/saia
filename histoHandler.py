@@ -16,6 +16,9 @@ class histo_handler:
     def __init__(self):
         # histogram statistics and variables for plotting:
         self.stats_dict = OrderedDict([('Hist ID',np.array([], dtype=int)),
+        ('Start file #',np.array([], dtype=int)),
+        ('End file #',np.array([], dtype=int)),
+        ('ROI xc ; yc ; size',np.array([], dtype=str)),
         ('Counts above : below threshold',np.array([], dtype=str)),
         ('User variable',np.array([], dtype=float)),
         ('Number of images processed',np.array([], dtype=int)), 
