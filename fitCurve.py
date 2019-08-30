@@ -8,7 +8,18 @@ from scipy.optimize import curve_fit
 from scipy.special import factorial
 
 class fit:
-    """Collection of common functions for theoretical fits."""
+    """Collection of common functions for theoretical fits.
+    
+    Since good fitting often depends on a initial estimate, 
+    the estGaussParam() function is used estimate parameters 
+    for a Gaussian fit. The getBestFit(fn) function applies
+    the function fn to (xdat, ydat), updating the best fit
+    parameters ps and their errors perrs.
+    Keyword arguments:
+    xdat  -- independent variable array
+    ydat  -- dependent variable array
+    erry  -- errors in the dependent variable array
+    param -- optional best fit parameter estimate"""
     def __init__(self, xdat=0, ydat=0, erry=None, param=None):
         self.x    = xdat   # independent variable
         self.y    = ydat   # measured dependent variable
@@ -30,7 +41,7 @@ class fit:
         except IndexError:
             xm = self.x[Aind - np.size(self.y[:Aind]) + np.where(self.y[:Aind] - np.min(self.y) < A/2.)[0][-1]]
         e2_width = np.sqrt(2/np.log(2)) * abs(x0 - xm)
-        # parameters: amplitude, centre, width, offset
+        # parameters: [amplitude, centre, standard deviation] #, offset]
         self.p0 = [A, x0, e2_width/2.] #, np.min(self.y)]
     
     def offGauss(self, x, A, x0, wx, y0):

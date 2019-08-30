@@ -1,13 +1,11 @@
 """Single Atom Image Analysis
 Stefan Spence 14/03/19
 
-Separate out the image_handler class for processing single atom images from the
+Separate out the imageHandler class for processing single atom images from the
 director watcher and Qt GUI. This allows it to be imported for other purposes.
-
 Assume that there are two peaks in the histogram which are separated by a 
 region of zeros.
-
-Assuming that image files are ASCII.
+Assuming that image files are ASCII and the first column is the row number.
 """
 import os
 import sys
@@ -37,38 +35,44 @@ def est_param(h):
         
 # convert an image into its pixel counts to put into a histogram
 class image_handler:
-    """load an ROI image centred on the atom, integrate the counts,
-    then compare to the threshold
-    for speed, make an array of counts with length n. If the number of images
-    analysed exceeds (n-10) of this length then append another n"""
+    """Analyse individual image files and create a histogram.
+    
+    Load an ROI image centred on the atom, integrate the counts,
+    then compare to the threshold. For speed, make an array of 
+    counts with length n. If the number of images analysed exceeds 
+    (n-10) of this length then append another n elements to the array.
+    The variables stored in relation to an individual image file are:
+        """
     def __init__(self):
         self.delim = ' '                # delimieter to use when opening files
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts over the ROI
         self.mid_count = np.zeros(self.n)# count at the centre of the ROI
+        self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
+        self.std_count  = np.zeros(self.n) # list of standard deviation of counts in image
+        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
+        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
+        self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
+        self.files = np.array([None]*(self.n)) # labels of files.
         self.peak_indexes = [0,0]       # indexes of peaks in histogram
         self.peak_heights = [0,0]       # heights of peaks in histogram
         self.peak_widths  = [0,0]       # widths of peaks in histogram
         self.peak_counts  = [0,0]       # peak position in counts in histogram
         self.fidelity     = 0           # fidelity of detecting atom presence
         self.err_fidelity = 0           # error in fidelity
-        self.mean_count = np.zeros(self.n) # list of mean counts in image - estimates background 
-        self.std_count  = np.zeros(self.n) # list of standard deviation of counts in image
-        self.xc_list = np.zeros(self.n) # horizontal positions of max pixel
-        self.yc_list = np.zeros(self.n) # vertical positions of max pixel
         self.xc = 0                     # ROI centre x position 
         self.yc = 0                     # ROI centre y position
         self.roi_size =  1              # ROI length in pixels. default 1 takes top left pixel
         self.pic_size = 512             # number of pixels in an image
         self.thresh = 1                 # initial threshold for atom detection
-        self.atom = np.zeros(self.n)    # deduce presence of an atom by comparison with threshold
-        self.files = np.array([None]*(self.n)) # labels of files. 
         self.im_num = 0                 # number of images processed
         self.im_vals = np.array([])     # the data from the last image is accessible to an image_handler instance
         self.bin_array = []             # if bins for the histogram are supplied, plotting can be faster
         
     def set_pic_size(self, im_name):
-        """Set the pic size by looking at the number of columns in a file"""
+        """Set the pic size by looking at the number of columns in a file
+        Keyword arguments:
+        im_name    -- absolute path to the image file to load"""
         im_vals = np.genfromtxt(im_name, delimiter=self.delim)
         self.pic_size = int(np.size(im_vals[0]) - 1) # the first column of ASCII image is row number
         return self.pic_size
@@ -87,17 +91,22 @@ class image_handler:
         
         
     def load_full_im(self, im_name):
-        """return an array with the values of the image"""
+        """return an array with the values of the pixels in an image.
+        Assume that the first column is the column number.
+        Keyword arguments:
+        im_name    -- absolute path to the image file to load"""
         # np.array(Image.open(im_name)) # for bmp images
         # return np.genfromtxt(im_name, delimiter=self.delim)#[:,1:] # first column gives column number
         return np.loadtxt(im_name, delimiter=self.delim,
                               usecols=range(1,self.pic_size+1))
         
     def process(self, im_name):
-        """Get the data from an image """
+        """Get the data from an image. If the arrays have reached their max
+        size, then expand them before getting data from the image.
+        Keyword arguments:
+        im_name    -- absolute path to the image file to load"""
         try:
             self.add_count(im_name)
-            
         except IndexError: # this is a bad exception - the error might be from a bad ROI rather than reaching the end of the arrays
             # filled the array of size n so add more elements
             if self.im_num % (self.n - 10) == 0 and self.im_num > self.n / 2:
@@ -114,7 +123,9 @@ class image_handler:
     def add_count(self, im_name):
         """Fill in the next index of the counts by summing over the ROI region and then 
         getting a counts/pixel. 
-        Fill in the next index of the file, xc, yc, mean, std arrays."""
+        Fill in the next index of the file, xc, yc, mean, stdv arrays.
+        Keyword arguments:
+        im_name    -- absolute path to the image file to load"""
         full_im = self.load_full_im(im_name) # make an array of the image
         not_roi = full_im.copy()
         # get the ROI
@@ -137,18 +148,14 @@ class image_handler:
         N = np.size(full_im) - np.size(self.im_vals)
         self.mean_count[self.im_num] = np.sum(not_roi) / N
         self.std_count[self.im_num] = np.sqrt(np.sum((not_roi[not_roi>0]-self.mean_count[self.im_num])**2) / (N - 1))
-
         # sum of counts in the ROI of the image gives the signal
         self.counts[self.im_num] = np.sum(self.im_vals) # / np.size(self.im_vals) # mean
-        
         # naming convention: [Species]_[date]_[Dexter file #]
         self.files[self.im_num] = im_name.split("_")[-1].split(".")[0]
-
         # the pixel value at the centre of the ROI
         self.mid_count[self.im_num] = full_im[self.xc, self.yc]
         # position of the (first) max intensity pixel
         self.xc_list[self.im_num], self.yc_list[self.im_num] = np.unravel_index(np.argmax(full_im), full_im.shape)
-        
         self.im_num += 1
             
     def get_fidelity(self, thresh=None):
@@ -175,8 +182,16 @@ class image_handler:
 
     def search_fidelity(self, p1, pw1, p2, n=10):
         """Take n values for the threshold between positions p1 and 
-        p1 + 15*pw1 or p2, whichever is smaller.
-        Calculate the threshold for each value and then take the max"""
+        p1 + 15*pw1 or p2, whichever is smaller. Calculate the threshold for 
+        each value. Choose the threshold that first gives a fidelity > 0.9999,
+        or if that isn't possible, the threshold that maximises the fidelity.
+        Keyword arguments:
+        p1  -- the lower limit for the threshold (the background peak mean).
+        pw1 -- the width of the background peak, used to guess an upper limit.
+        p2  -- the upper limit for the threshold if it's smaller than p1+15*pw1
+                (the signal peak mean).
+        n   -- the number of thresholds to take between the peaks
+        """
         uplim = min([p1 + 15*pw1, p2]) # highest possible value for the threshold 
         threshes = np.linspace(p1, uplim, n) # n points between peaks
         fid, err_fid = 0, 0  # store the previous value of the fidelity
@@ -193,17 +208,14 @@ class image_handler:
             
     def hist_and_thresh(self):
         """Make a histogram of the photon counts and determine a threshold for 
-        single atom presence."""
+        single atom presence by iteratively checking the fidelity."""
         bins, occ, _ = self.histogram()
         self.thresh = np.mean(bins) # in case peak calculation fails
-
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # set the threshold where the fidelity is max
             self.search_fidelity(self.peak_counts[0], self.peak_widths[0] ,self.peak_counts[1])
-
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
-
         return bins, occ, self.thresh
 
     def histogram(self):
@@ -211,26 +223,23 @@ class image_handler:
         if np.size(self.bin_array) > 0: 
             occ, bins = np.histogram(self.counts[:self.im_num], self.bin_array) # fixed bins. 
         else:
-            if self.im_num:
+            try:
                 lo, hi = min(self.counts[:self.im_num]), max(self.counts[:self.im_num])
-            else: lo, hi = 1,1
-            # scale number of bins with number of files in histogram and with separation of peaks
-            num_bins = int(17 + 5e-5 * self.im_num**2 + ((hi - lo)/hi)**2*20) 
+                # scale number of bins with number of files in histogram and with separation of peaks
+                num_bins = int(17 + 5e-5 * self.im_num**2 + ((hi - lo)/hi)**2*20) 
+            except: 
+                lo, hi, num_bins = 0, 1, 10
             occ, bins = np.histogram(self.counts[:self.im_num], bins=num_bins) # no bins provided by user
-
         # get the indexes of peak positions, heights, and widths
         self.peak_indexes, self.peak_heights, self.peak_widths = est_param(occ)
         self.peak_counts = bins[self.peak_indexes] + 0.5*(bins[1] - bins[0])
-        
         if np.size(self.peak_indexes) == 2: # est_param will only find one peak if the number of bins is small
             # convert widths from indexes into counts
             # assume the peak_width is the FWHM, although scipy docs aren't clear
             self.peak_widths = [(bins[1] - bins[0]) * self.peak_widths[0]/2., # /np.sqrt(2*np.log(2)), 
                                 (bins[1] - bins[0]) * self.peak_widths[1]/2.] # /np.sqrt(2*np.log(2))]
-
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh
-
         return bins, occ, self.thresh
         
 
@@ -244,14 +253,12 @@ class image_handler:
         ascend = np.sort(self.counts[:self.im_num])
         bg = ascend[ascend < self.thresh]     # background
         signal = ascend[ascend > self.thresh] # signal above threshold
-
         bg_peak = np.mean(bg)
         bg_stdv = np.std(bg, ddof=1)
         at_peak = np.mean(signal)
         at_stdv = np.std(signal, ddof=1)
         sep = at_peak - bg_peak
         self.thresh = bg_peak + 5*bg_stdv # update threshold
-
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
         atom_count = np.size(np.where(self.atom > 0)[0])  # images with counts above threshold
@@ -260,9 +267,7 @@ class image_handler:
         # use the binomial distribution to get 1 sigma confidence intervals:
         conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys')
         load_err = np.around(conf[1] - conf[0], 4)
-
         self.fidelity, self. err_fidelity = np.around(self.get_fidelity(), 4)
-
         return np.array(self.im_num, load_prob, load_err, bg_peak, bg_stdv, at_peak,
                 at_stdv, sep, self.fidelity, self.err_fidelity, self.thresh)
 
@@ -270,11 +275,13 @@ class image_handler:
     def set_roi(self, im_name='', dimensions=[]):
         """Set the ROI for the image either by finding the position of the max 
         in the file im_name, or by taking user supplied dimensions [xc, yc, 
-        roi_size]. The default is to use supplied dimensions."""
+        roi_size]. The default is to use supplied dimensions.
+        Keyword arguments:
+        im_name    -- absolute path to the image file to load
+        dimensions -- user-supplied dimensions to set the ROI to [xc, yc, size]"""
         if np.size(dimensions) != 0:
             self.xc, self.yc, self.roi_size = list(map(int, dimensions))
             return 1
-            
         elif len(im_name) != 0:
             # presume the supplied image has an atom in and take the max
             # pixel's position at the centre of the ROI
@@ -282,18 +289,18 @@ class image_handler:
             xcs, ycs  = np.where(im_vals == np.max(im_vals))
             self.xc, self.yc = xcs[0], ycs[0]
             return 1
-            
         else:
             # print("set_roi usage: supply im_name to get xc, yc or supply dimensions [xc, yc, l]")
             return 0 
         
     def load_from_csv(self, file_name):
-        """Load back in the counts data from a stored csv file, leavning space
-        in the arrays to add new data as well"""
+        """Load back in the counts data from a stored csv file, leaving space
+        in the arrays to add new data as well
+        Keyword arguments:
+        file_name -- the absolute path to the file to load from"""
         data = np.genfromtxt(file_name, delimiter=',')
         with open(file_name, 'r') as f:
-            header = f.readline()
-        
+            header = f.readline() # check the column headings, might vary between csv files.
         i = 0
         self.files = np.concatenate((self.files[:self.im_num], data[:,i], np.array([None]*self.n)))
         self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
@@ -312,24 +319,30 @@ class image_handler:
 
         
     def save_state(self, save_file_name, hist_header=None, hist_stats=None):
-        """Save the processed data to csv"""
+        """Save the processed data to csv. 
+        
+        The column headings are: 
+            File, Counts, Atom Detected (threshold), ROI Centre Count, 
+            X-pos (max pix), Y-pos (max pix), Mean Count outside of ROI, 
+            standard deviation
+        Keyword arguments:
+        save_file_name -- the absolute path and name of the file to save to
+        hist_header    -- a list of strings for the headings of histogram statistics
+        hist_stats     -- a list of histogram statistics associated with this histogram
+        """
         # atom is present if the counts are above threshold
         self.atom[:self.im_num] = self.counts[:self.im_num] // self.thresh 
-        
         # histogram data
         out_arr = np.array((self.files[:self.im_num], self.counts[:self.im_num], 
             self.atom[:self.im_num], self.mid_count[:self.im_num], self.xc_list[:self.im_num], 
             self.yc_list[:self.im_num], self.mean_count[:self.im_num],
             self.std_count[:self.im_num])).T
-                    
         header = ''
         # if there is histogram data, add this in as well
         if np.size(hist_header) > 1 and np.size(hist_stats) > 1:
             header += ','.join(hist_header)
             header += '\n' + ','.join(list(map(str, hist_stats))) + '\n'
-        
         header += 'File, Counts, Atom Detected (threshold=%s), ROI Centre Count, X-pos (max pix), Y-pos (max pix), Mean Count, s.d.'
-
         np.savetxt(save_file_name, out_arr, fmt='%s', delimiter=',',
                 header=header%int(self.thresh))
 

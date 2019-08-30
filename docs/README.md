@@ -32,8 +32,8 @@ Results path	The default location to open the file browser for saving csv files
 	• Note that when loading in new data it will use the current ROI settings on display. It will ask whether you want to clear the current array, which will prevent mixing of data with different ROI settings.
 	
 	• For the current histogram there are several binning options:
-Automatic Binning (Default)	Numpy decides the binning automatically
-Manual	When the Max, Min, and #Bins text edits are populated, the histogram will be set with those limits. Otherwise choose the min and max counts as the limits, and the number of bins is taken to be 10 + N//20, where N is the number of images in the histogram.
+Automatic Binning (Default)	the number of bins is taken to be 17 + 5e-5 * N^2 + 20 * ((max-min)/max)^2, where N is the number of images in the histogram and max/min are the extreme counts in the histogram.
+Manual	When the Max, Min, and #Bins text edits are populated, the histogram will be set with those limits. Otherwise do automatic binning.
 No Display	The directory watcher will still run and files will still be processed, but the histogram will not be replotted (speeds up processing)
 No Update	The directory watcher still runs, so files are saved/moved, but not processed for the histogram
 

@@ -26,19 +26,29 @@ from watchdog.events import FileSystemEventHandler
     
 # set up an event handler that is also a QObject through inheritance of QThread
 class system_event_handler(FileSystemEventHandler, QThread):
-    """The event handler responds to file creation events and emits the path
-    to the file as a signal"""
+    """Define how the watchdog should respond to events.
+    
+    The event handler responds to file creation events and emits the path
+    to the file as a signal. When a file creation event is noticed, the
+    on_created() function should be triggered, which waits for a file to
+    finishing being written to, produces a synchronised label for it, copies
+    it to a new directory, deletes the old file, and then emits the new file
+    name as a signal.
+    Keyword arguments:
+    image_storage_path    -- the directory to save the new images to
+    dexter_sync_file_name -- the absolute path to the file with the DExTer sync number
+    date                  -- today's date in string format [day][short month][year]
+    """
     event_path = pyqtSignal(str)
     
     def __init__(self, image_storage_path, dexter_sync_file_name, date):
         super().__init__()
-        
-        self.dfn = ""    # dexter file number
-        self.last_event_path = ""   # last event processed 
+        self.dfn = ""              # dexter file number
+        self.last_event_path = ""  # last event processed 
         self.image_storage_path = image_storage_path  # directory where we copy images to
         self.dexter_sync_file_name = dexter_sync_file_name # path to file where dexter syncs its file #
-        self.date = date # today's date
-        self.init_t = time.time()      # time of initiation: use to test how long it takes to realise an event is started
+        self.date = date           # today's date
+        self.init_t = time.time()  # time of initiation: use to test how long it takes to realise an event is started
         self.event_t = 0           # time taken to process the last event
         self.end_t = time.time()   # time at end of event
         self.idle_t = 0            # time between events
@@ -74,16 +84,12 @@ class system_event_handler(FileSystemEventHandler, QThread):
         image storage dir"""
         t0 = time.time()
         self.idle_t = t0 - self.end_t   # duration between end of last event and start of current event
-        
         self.wait_for_file(event.src_path) # wait until file has been written        
         self.write_t = time.time() - t0
-        
         # get Dexter file number  
         self.sync_dexter()
-                
         # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
         new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
-        
         self.copy_t = time.time()
         try:
             shutil.copyfile(event.src_path, new_file_name)
@@ -91,8 +97,7 @@ class system_event_handler(FileSystemEventHandler, QThread):
             print("WARNING: added a pause because python tried to access the file before the other program had let go")
             time.sleep(0.2)
             shutil.copyfile(event.src_path, new_file_name)
-        
-        
+
         self.wait_for_file(new_file_name) # wait until file has been copied
         self.copy_t = time.time() - self.copy_t
         try:
@@ -101,10 +106,9 @@ class system_event_handler(FileSystemEventHandler, QThread):
             print("WARNING: added a pause because python tried to access the file before the other program had let go")
             time.sleep(0.5)
             os.remove(event.src_path)
-        
+
         self.last_event_path = new_file_name  # update last event path
         self.event_path.emit(new_file_name)  # emit signal
-        
         self.end_t = time.time()       # time at end of current event
         self.event_t = self.end_t - t0 # duration of event
         
@@ -112,9 +116,16 @@ class system_event_handler(FileSystemEventHandler, QThread):
 
 # set up a separate event handler that reads in new files but doesn't copy or delete
 class silent_event_handler(system_event_handler):
-    """The event handler responds to file creation events and emits the path
+    """Define how the watchdog should respond to events.
+    
+    The event handler responds to file creation events and emits the path
     to the file as a signal. This silent event handler does not copy or delete
-    files, merely emit the event path."""
+    files, merely emit the event path.
+    Keyword arguments:
+    image_storage_path    -- the directory to save the new images to
+    dexter_sync_file_name -- the absolute path to the file with the DExTer sync number
+    date                  -- today's date in string format [day][short month][year]
+    """
     event_path = pyqtSignal(str)
     
     def __init__(self, image_storage_path, dexter_sync_file_name, date):
@@ -126,13 +137,10 @@ class silent_event_handler(system_event_handler):
         image storage dir"""
         t0 = time.time()
         self.idle_t = t0 - self.end_t # duration between end of last event and start of current event
-        
         self.wait_for_file(event.src_path) # wait until file has been written        
         self.write_t = time.time() - t0
-
         self.last_event_path = event.src_path  # update last event path
         self.event_path.emit(event.src_path)  # emit signal
-        
         self.end_t = time.time()       # time at end of current event
         self.event_t = self.end_t - t0 # duration of event
 
@@ -140,10 +148,26 @@ class silent_event_handler(system_event_handler):
     
 # setup up a watcher to detect changes in the image read directory
 class dir_watcher(QThread):
-    """Watches a directory to detect changes in the files present"""
-    def __init__(self, config_file='./config.dat', active=True):
+    """Watches a directory to detect changes in the files present
+    
+    Sets up the relevant directories in a dictionary so that they're
+    easily referenced. Use a config file to load the directories.
+    Initiate an observer that watches for file creation events and
+    processes them with the chosen event_handler, which can be 
+    actively moving files, or passively reading in the event path.
+    Keyword arguments:
+    config_file -- the file to load relevant directories from.
+        The format is important for reading in the directories.
+        image_storage_path    -- directory that new images will 
+                be written to.
+        log_file_path         -- directory to save log files to.
+        dexter_sync_file_name -- absolute path to DExTer currentfile.txt
+        image_read_path       -- directory that new image creation
+                events will occur in.
+        results_path          -- directory for results to be stored in
+    """
+    def __init__(self, config_file='./config/config.dat', active=True):
         super().__init__()
-        
         # load paths used from config.dat
         self.dirs_dict = self.get_dirs(config_file)  # handy dict contains them all
         self.image_storage_path = self.dirs_dict['Image Storage Path: ']
@@ -151,31 +175,26 @@ class dir_watcher(QThread):
         self.dexter_sync_file_name = self.dirs_dict['Dexter Sync File: ']
         self.image_read_path = self.dirs_dict['Image Read Path: ']
         self.results_path = self.dirs_dict['Results Path: ']
-
         if self.image_storage_path: # =0 if get_dirs couldn't find config.dat, else continue
             # create the watchdog object
             self.observer = Observer()
-            
             # get the date to be used for file labeling
             self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
             self.image_storage_path += r'\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])
-            
             if active: # active event handler copies then deletes new files
                 self.event_handler = system_event_handler(self.image_storage_path, 
                                 self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
             else: # passive event handler just emits the event path
                 self.event_handler = silent_event_handler(self.image_storage_path, 
                                 self.dexter_sync_file_name, self.date[0]+self.date[1]+self.date[3])
-        
             # create image storage directory by date if it doesn't already exist
             os.makedirs(self.image_storage_path, exist_ok=True) # requies version > 3.2
-            
-            # initiate observer
+            # initiate observer, don't recursively search directories within the image_read_path
             self.observer.schedule(self.event_handler, self.image_read_path, recursive=False)
             self.observer.start()
     
     @staticmethod # static method can be accessed without making an instance of the class
-    def get_dirs(config_file='./config.dat'):
+    def get_dirs(config_file='./config/config.dat'):
         """Load the paths used from the config.dat file or prompt user if 
         it can't be found"""
         # load config file for directories or prompt user if first time setup
@@ -217,7 +236,11 @@ class dir_watcher(QThread):
     def run(self):
         pass
         
-    def save_config(self, config_file='./config.dat'):
+    def save_config(self, config_file='./config/config.dat'):
+        """Write the directories currently in use into a new config file."""
+        outstr = '// list of required directories for SAIA\n'
+        for key, value in [d for d in self.dirs_dict.values()]:
+            outstr += key + '\t\t--' + value + '\n'
         with open(config_file, 'w+') as config_file:
-            config_file.write(self.print_dirs(*[d for d in self.dirs_dict.values()]))
+            config_file.write(outstr)
   

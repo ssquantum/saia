@@ -14,18 +14,13 @@ Assume that image files are ASCII
 
 Use Qt to send the signal from the watchdog to a real-time plot
 """
+__version__ = '1.3'
 import os
 import sys
+import time
 import numpy as np
 from astropy.stats import binom_conf_interval
 import pyqtgraph as pg    # not as flexible as matplotlib but works a lot better with qt
-# change directory to this file's location
-os.chdir(os.path.dirname(os.path.realpath(__file__))) 
-import imageHandler as ih # process images to build up a histogram
-import histoHandler as hh # collect data from histograms together
-import directoryWatcher as dw # use watchdog to get file creation events
-import fitCurve as fc   # custom class to get best fit parameters using curve_fit
-import time
 # some python packages use PyQt4, some use PyQt5...
 try:
     from PyQt4.QtCore import QThread, pyqtSignal, QEvent, QRegExp
@@ -40,19 +35,44 @@ except ImportError:
             QActionGroup, QVBoxLayout, QFont, QRegExpValidator)
     from PyQt5.QtWidgets import (QApplication, QPushButton, QWidget, QTabWidget,
         QAction, QMainWindow, QLabel)
+# change directory to this file's location
+os.chdir(os.path.dirname(os.path.realpath(__file__))) 
+import imageHandler as ih # process images to build up a histogram
+import histoHandler as hh # collect data from histograms together
+import directoryWatcher as dw # use watchdog to get file creation events
+import fitCurve as fc   # custom class to get best fit parameters using curve_fit
           
 ####    ####    ####    ####
 
 # main GUI window contains all the widgets                
 class main_window(QMainWindow):
-    """Use Qt to produce the window where the histogram plot is shown
-    have a simple interface for the user to control the limits of the plot 
-    and number of bins in the histogram
-    
-    This GUI was produced with help from http://zetcode.com/gui/pyqt5/"""
-    def __init__(self):
+    """Main GUI window managing an instance of SAIA.
+
+    Use Qt to produce the window where the histogram plot is shown.
+    A simple interface allows the user to control the limits of the plot 
+    and number of bins in the histogram. Separate tabs are made for 
+    settings, multirun options, the histogram, histogram statistics,
+    displaying an image, and plotting histogram statistics.
+     - The imageHandler module manages variables associated with individual 
+        files and creates the histogram
+     - The histoHandler module manages variables associated with the 
+        collection of files in several histograms
+     - The directoryWatcher module manages file moving, saving, and naming.
+     - The fitCurve module stores common functions for curve fitting.
+    This GUI was produced with help from http://zetcode.com/gui/pyqt5/.
+    Keyword arguments:
+    config_file  -- if absolute path to a config file that contains 
+        the directories for the directoryWatcher is supplied, then use 
+        this instead of the default './config/config.dat'.
+    pop_up       -- control whether a pop-up window asks the user to 
+        initiate the directoryWatcher. 
+        0: don't initiate the directoryWatcher.
+        1: tacitly initiate the directoryWatcher.
+        2: pop-up window asks the user if they want to initiate.
+    """
+    def __init__(self, config_file='./config/config.dat', pop_up=2):
         super().__init__()
-        self.bias = 697 # bias off set from EMCCD
+        self.bias = 697   # bias off set from EMCCD
         self.Nr   = 8.8   # read-out noise from EMCCD
         self.dir_watcher = None  # a button will initiate the dir watcher
         self.image_handler = ih.image_handler() # class to process images
@@ -61,8 +81,8 @@ class main_window(QMainWindow):
         pg.setConfigOption('background', 'w') # set graph background default white
         pg.setConfigOption('foreground', 'k') # set graph foreground default black
         self.date = time.strftime("%d %b %B %Y", time.localtime()).split(" ") # day short_month long_month year
-        self.init_UI()  # make the widgets
-        self.init_DW()  # ask the user if they want to start the dir watcher
+        self.init_UI(config_file)  # make the widgets
+        self.init_DW(pop_up)  # ask the user if they want to start the dir watcher
         self.init_log() # write header to the log file that collects histograms
         self.t0 = time.time()  # time of initiation
         self.int_time = 0      # time taken to process an image
@@ -91,7 +111,7 @@ class main_window(QMainWindow):
                 f.write('#'+', '.join(self.histo_handler.stats_dict.keys())+'\n')
        
 
-    def init_UI(self):
+    def init_UI(self, config_file='./config/config.dat'):
         """Create all of the widget objects required"""
         # grid layout: central main plot, params above, dir watcher status at bottom
         self.centre_widget = QWidget()
@@ -145,8 +165,9 @@ class main_window(QMainWindow):
         bin_options = QActionGroup(bin_menu)  # group together the options
         self.bin_actions = []
         for action_label in ['Automatic', 'Manual', 'No Display', 'No Update']:
-            self.bin_actions.append(QAction(action_label, bin_menu, checkable=True, 
-                            checked=action_label=='Automatic')) # default is auto
+            self.bin_actions.append(QAction(
+                action_label, bin_menu, checkable=True, 
+                checked=action_label=='Automatic')) # default is auto
             bin_menu.addAction(self.bin_actions[-1])
             bin_options.addAction(self.bin_actions[-1])
         bin_options.setExclusive(True) # only one option checked at a time
@@ -238,7 +259,7 @@ class main_window(QMainWindow):
         settings_grid.addWidget(config_label, 6,0, 1,1)
         self.config_edit = QLineEdit(self)
         settings_grid.addWidget(self.config_edit, 6,1, 1,1)
-        self.config_edit.setText('./config.dat')
+        self.config_edit.setText(config_file)
         self.config_edit.editingFinished.connect(self.path_text_edit)
 
 
@@ -349,7 +370,8 @@ class main_window(QMainWindow):
         multirun_grid.addWidget(self.multirun_pause, 6,2, 1,1)
 
         # display current progress
-        self.multirun_progress = QLabel('User variable: , omit 0 of 0 files, 0 of 100 histogram files, 0% complete')
+        self.multirun_progress = QLabel(
+            'User variable: , omit 0 of 0 files, 0 of 100 histogram files, 0% complete')
         multirun_grid.addWidget(self.multirun_progress, 712,0, 1,3)
 
         #### tab for histogram ####
@@ -425,19 +447,19 @@ class main_window(QMainWindow):
             stat_grid.addWidget(self.stat_labels[label_text], i+1,1, 1,1)
             
         # update statistics
-        stat_update = QPushButton('Update statistics', self)
-        stat_update.clicked[bool].connect(self.update_stats)
-        stat_grid.addWidget(stat_update, i+2,0, 1,1)
+        self.stat_update_button = QPushButton('Update statistics', self)
+        self.stat_update_button.clicked[bool].connect(self.update_stats)
+        stat_grid.addWidget(self.stat_update_button, i+2,0, 1,1)
 
         # do Gaussian/Poissonian fit - peaks and widths
-        fit_update = QPushButton('Get best fit', self)
-        fit_update.clicked[bool].connect(self.update_fit)
-        stat_grid.addWidget(fit_update, i+2,1, 1,1)
+        self.fit_update_button = QPushButton('Get best fit', self)
+        self.fit_update_button.clicked[bool].connect(self.update_fit)
+        stat_grid.addWidget(self.fit_update_button, i+2,1, 1,1)
 
         # do a Gaussian fit just to the background peak
-        fit_bg = QPushButton('Fit background', self)
-        fit_bg.clicked[bool].connect(self.fit_bg_gaussian)
-        stat_grid.addWidget(fit_bg, i+2,2, 1,1)
+        self.fit_bg_button = QPushButton('Fit background', self)
+        self.fit_bg_button.clicked[bool].connect(self.fit_bg_gaussian)
+        stat_grid.addWidget(self.fit_bg_button, i+2,2, 1,1)
 
         # quickly add the current histogram statistics to the plot
         add_to_plot = QPushButton('Add to plot', self)
@@ -486,7 +508,8 @@ class main_window(QMainWindow):
         self.roi.addScaleHandle([1,1], [0.5,0.5]) # allow user to adjust ROI size
         viewbox.addItem(self.roi)
         self.roi.setZValue(10)   # make sure the ROI is drawn above the image
-        self.roi.sigRegionChangeFinished.connect(self.user_roi) # signal emitted when user stops dragging ROI
+        # signal emitted when user stops dragging ROI
+        self.roi.sigRegionChangeFinished.connect(self.user_roi) 
         # make a histogram to control the intensity scaling
         self.im_hist = pg.HistogramLUTItem()
         self.im_hist.setImageItem(self.im_canvas)
@@ -509,7 +532,8 @@ class main_window(QMainWindow):
         # x and y labels
         self.plot_labels = [QComboBox(self), QComboBox(self)]
         for i in range(len(self.plot_labels)):
-            self.plot_labels[i].addItems(list(self.histo_handler.stats_dict.keys())) # add options
+            # add options
+            self.plot_labels[i].addItems(list(self.histo_handler.stats_dict.keys())) 
             # connect buttons to update functions
             self.plot_labels[i].activated[str].connect(self.update_varplot_axes)
         # empty text box for the user to write their xlabel
@@ -536,21 +560,31 @@ class main_window(QMainWindow):
         
     #### #### initiation functions #### #### 
 
-    def init_DW(self):
-        """Ask the user if they want to start the dir watcher or not"""
+    def init_DW(self, pop_up=2):
+        """Ask the user if they want to start the dir watcher or not
+        Keyword arguments:
+        pop_up       -- control whether a pop-up window asks the user to 
+            initiate the directoryWatcher. 
+            0: don't initiate the directoryWatcher.
+            1: tacitly initiate the directoryWatcher.
+            2: pop-up window asks the user if they want to initiate."""
         dir_watcher_dict = dw.dir_watcher.get_dirs(self.config_edit.text()) # static method
-        pad = 0 # make the message box wider by padding out the first line
-        for fp in dir_watcher_dict.values():
-            if len(fp) > pad:
-                pad = len(fp)
-                
-        text = "Loaded from config file."+''.join(['  ']*pad)+".\n"
-        text += dw.dir_watcher.print_dirs(dir_watcher_dict.items()) # static method
-        text += "\nStart the directory watcher with these settings?"
-        reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
-            text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        if pop_up == 2: # make pop_up window ask whether you want to initiate
+            pad = 0 # make the message box wider by padding out the first line
+            for fp in dir_watcher_dict.values():
+                if len(fp) > pad:
+                    pad = len(fp)
+            text = "Loaded from config file."+''.join(['  ']*pad)+".\n"
+            text += dw.dir_watcher.print_dirs(dir_watcher_dict.items()) # static method
+            text += "\nStart the directory watcher with these settings?"
+            reply = QMessageBox.question(self, 'Initiate the Directory Watcher',
+                text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.reset_DW() # takes the config file from config_edit
+        elif pop_up == 1:
             self.reset_DW()
+        elif pop_up == 0:
+            pass
 
     def remove_im_files(self):
         """Ask the user if they want to remove image files from the read image
@@ -591,29 +625,26 @@ class main_window(QMainWindow):
             self.dw_status_label.setText("Stopped")
             self.dw_init_button.setText('Initiate directory watcher') # turns on
             self.recent_label.setText('')
-
         else: 
-            # prompt user if they want to remove image files
-            self.dir_watcher = dw.dir_watcher(config_file=self.config_edit.text(),
-                                    active=self.dw_mode.isChecked()) # instantiate dir watcher
+            self.dir_watcher = dw.dir_watcher(
+                    config_file=self.config_edit.text(),
+                    active=self.dw_mode.isChecked()) # instantiate dir watcher
             self.remove_im_files() # prompt to remove image files
             self.dir_watcher.event_handler.event_path.connect(self.update_plot) # default
             self.dir_watcher.event_handler.sync_dexter() # get the current Dexter file number
             self.dw_status_label.setText("Running")
-
             # get current date
             self.date = self.dir_watcher.date
             date_str = ' '.join([self.date[0]]+self.date[2:])
             self.init_log() # make a new log file
-
             pad = 0 # make the message box wider by padding out the first line
             for fp in self.dir_watcher.dirs_dict.values():
                 if len(fp) > pad:
                     pad = len(fp)
-
             msg = QMessageBox() # pop up box to confirm it's started
             msg.setIcon(QMessageBox.Information)
-            msg.setText("Directory Watcher initiated in " + self.dw_mode.text()
+            msg.setText(
+                "Directory Watcher initiated in " + self.dw_mode.text()
                 + " mode with settings:" + ''.join([' ']*pad) + ".\n\n" + 
                 "date\t\t\t--" + date_str + "\n\n" +
                 self.dir_watcher.print_dirs(self.dir_watcher.dirs_dict.items()))
@@ -683,7 +714,8 @@ class main_window(QMainWindow):
             new_var = list(map(float, [v for v in self.entry_edit.text().split(',') if v]))
             if np.size(new_var) == 1: # just entered a single variable
                 self.mr['var list'].append(new_var[0])
-                self.multirun_vars.setText(','.join(list(map(str, self.mr['var list']))))
+                # empty the text edit so that it's quicker to enter a new variable
+                self.entry_edit.setText('') 
 
             elif np.size(new_var) == 3: # range, with no repeats
                 self.mr['var list'] += list(np.arange(new_var[0], new_var[1], new_var[2]))
@@ -709,7 +741,6 @@ class main_window(QMainWindow):
             self.multirun_save_dir.setText(dir_path)
         except OSError:
             pass # user cancelled - file not found
-            
         
     def roi_text_edit(self, text):
         """Update the ROI position and size every time a text edit is made by
@@ -727,7 +758,6 @@ class main_window(QMainWindow):
             l = 2*min([xc, yc])  # can't have the boundary go off the edge
         if int(l) == 0:
             l = 1 # can't have zero width
-        
         self.image_handler.set_roi(dimensions=list(map(int, [xc, yc, l])))
         self.xc_label.setText('ROI x_c = '+str(xc)) 
         self.yc_label.setText('ROI y_c = '+str(yc))
@@ -737,36 +767,34 @@ class main_window(QMainWindow):
         self.roi.setPos(xc - l//2, yc - l//2)
         self.roi.setSize(l, l)
         
-        
     def bins_text_edit(self, text):
         """Update the histogram bins every time a text edit is made by the user
-        to one of the line edit widgets"""
-        if self.bin_actions[1].isChecked(): # [Auto, Manual, No Display, No Update]
-            new_vals = [self.min_counts_edit.text(),
-                            self.max_counts_edit.text(), self.num_bins_edit.text()]
-                            
+        to one of the line edit widgets.
+        Don't update the histogram binning if the multirun is going because it
+        can affect the statistics."""
+        # bin_actions = [Auto, Manual, No Display, No Update]
+        if self.bin_actions[1].isChecked() and not self.multirun_switch.isChecked(): 
+            new_vals = [
+                self.min_counts_edit.text(), self.max_counts_edit.text(), self.num_bins_edit.text()]          
             # if the line edit widget is empty, take an estimate from histogram values
-            if new_vals[0] == '' and self.image_handler.im_num > 0:
+            if new_vals[0] == '' and self.image_handler.im_num > 0: # min
                 new_vals[0] = min(self.image_handler.counts[:self.image_handler.im_num])
-            if new_vals[1] == '' and self.image_handler.im_num > 0:
+            if new_vals[1] == '' and self.image_handler.im_num > 0: # max
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
             elif not any([v == '' for v in new_vals[:2]]) and int(new_vals[1]) < int(new_vals[0]):
                 # can't have max < min
                 new_vals[1] = max(self.image_handler.counts[:self.image_handler.im_num])
-            if new_vals[2] == '' and self.image_handler.im_num > 0:
-                # min. 17 bins. increase with # images and with separation
+            if new_vals[2] == '' and self.image_handler.im_num > 0: # num bins
+                # min 17 bins. Increase with # images and with separation
                 new_vals[2] = int(17 + 5e-5 * self.image_handler.im_num**2 + 
-                    (new_vals[1] - new_vals[0])/new_vals[1]*20)
+                    ((float(new_vals[1]) - float(new_vals[0]))/float(new_vals[1]))**2 * 20)
             if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
-                new_vals = [0, 1, 10]
-            if int(new_vals[2]) < 2:
-                # 0 bins causes value error
+                new_vals = [0, 1, 10] # catch all
+            if int(new_vals[2]) < 2:  # 0 bins causes value error
                 new_vals[2] = 10
             min_bin, max_bin, num_bins = list(map(int, new_vals))
-            
             # set the new values for the bins of the image handler
             self.image_handler.bin_array = np.linspace(min_bin, max_bin, num_bins)
-
             # set the new threshold if supplied
             if self.thresh_toggle.isChecked():
                 try:
@@ -803,7 +831,6 @@ class main_window(QMainWindow):
                 self.plot_current_hist(self.image_handler.histogram) # update hist and peak stats, keep thresh
             else:
                 self.plot_current_hist(self.image_handler.hist_and_thresh) # update hist and get peak stats
-
             above_idxs = np.where(self.image_handler.atom > 0)[0] # index of images with counts above threshold
             atom_count = np.size(above_idxs)  # number of images with counts above threshold
             above = self.image_handler.counts[above_idxs] # counts above threshold
@@ -811,8 +838,10 @@ class main_window(QMainWindow):
             empty_count = np.size(below_idxs) # number of images with counts below threshold
             below = self.image_handler.counts[below_idxs] # counts below threshold
             # use the binomial distribution to get 1 sigma confidence intervals:
-            conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
-
+            conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys')
+            loading_prob = atom_count/self.image_handler.im_num # fraction of images above threshold
+            uplperr = conf[1] - loading_prob # 1 sigma confidence above mean
+            lolperr = loading_prob - conf[0] # 1 sigma confidence below mean
             # store the calculated histogram statistics as temp, don't add to plot
             self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
             self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
@@ -822,8 +851,10 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
             self.histo_handler.temp_vals['Number of images processed'] = self.image_handler.im_num
             self.histo_handler.temp_vals['Counts above : below threshold'] = str(atom_count) + ' : ' + str(empty_count)
-            self.histo_handler.temp_vals['Loading probability'] = np.around(atom_count/self.image_handler.im_num, 4)
-            self.histo_handler.temp_vals['Error in Loading probability'] = np.around(conf[1] - conf[0], 4)
+            self.histo_handler.temp_vals['Loading probability'] = np.around(loading_prob, 4)
+            self.histo_handler.temp_vals['Error in Loading probability'] = np.around((uplperr+lolperr)*0.5, 4)
+            self.histo_handler.temp_vals['Lower Error in Loading probability'] = np.around(lolperr, 4)
+            self.histo_handler.temp_vals['Upper Error in Loading probability'] = np.around(uplperr, 4)
             if np.size(self.image_handler.peak_counts) == 2:
                 self.histo_handler.temp_vals['Background peak count'] = int(self.image_handler.peak_counts[0])
                 # assume bias offset is self.bias, readout noise standard deviation Nr
@@ -856,17 +887,16 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['Error in Fidelity'] = self.image_handler.err_fidelity
                 self.histo_handler.temp_vals['S/N'] = np.around(sep / np.sqrt(bgw**2 + siw**2), 2)
                 # fractional error in the error is 1/sqrt(2N - 2)
-                self.histo_handler.temp_vals['Error in S/N'] = np.around(self.histo_handler.temp_vals['S/N'] * np.sqrt((seperr/sep)**2 + 
-                        (bgw**2/(2*empty_count - 2) + siw**2/(2*atom_count - 2))/(bgw**2 + siw**2)), 2)
+                self.histo_handler.temp_vals['Error in S/N'] = np.around(
+                    self.histo_handler.temp_vals['S/N'] * np.sqrt((seperr/sep)**2 + 
+                    (bgw**2/(2*empty_count - 2) + siw**2/(2*atom_count - 2))/(bgw**2 + siw**2)), 2)
             else:
                 for key in ['Background peak count', 'sqrt(Nr^2 + Nbg)', 'Background peak width', 
                 'Error in Background peak count', 'Signal peak count', 'sqrt(Nr^2 + Ns)', 
                 'Signal peak width', 'Error in Signal peak count', 'Separation', 'Error in Separation', 
                 'Fidelity', 'Error in Fidelity', 'S/N', 'Error in S/N']:
                     self.histo_handler.temp_vals[key] = 0
-
             self.histo_handler.temp_vals['Threshold'] = int(self.image_handler.thresh)
-
             # display the new statistics in the labels
             for key, val in self.histo_handler.temp_vals.items():
                 self.stat_labels[key].setText(str(val))
@@ -880,23 +910,19 @@ class main_window(QMainWindow):
         bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
         diff = abs(bins - thresh)   # minimum is at the threshold
         thresh_i = np.argmin(diff)  # index of the threshold
-
         # split the histogram at the threshold value
         best_fits = [fc.fit(bins[:thresh_i]+bin_mid, occ[:thresh_i]),
                         fc.fit(bins[thresh_i:-1]+bin_mid, occ[thresh_i:])]
-
         for bf in best_fits:
             try:
                 bf.estGaussParam()         # get estimate of parameters
                 # parameters are: amplitude, centre, standard deviation
                 bf.getBestFit(bf.gauss)    # get best fit parameters
             except: return 0               # fit failed, do nothing
-
         # update image handler's values for peak parameters
         self.image_handler.peak_heights = np.array((best_fits[0].ps[0], best_fits[1].ps[0]))
         self.image_handler.peak_counts = np.array((best_fits[0].ps[1], best_fits[1].ps[1]))
         self.image_handler.peak_widths = np.array((best_fits[0].ps[2], best_fits[1].ps[2]))
-
         # update threshold to where fidelity is maximum
         if not self.thresh_toggle.isChecked(): # update thresh if not set by user
             self.image_handler.search_fidelity(best_fits[0].ps[1], best_fits[0].ps[2], 
@@ -909,7 +935,6 @@ class main_window(QMainWindow):
         for bf in best_fits:
             xs = np.linspace(min(bf.x), max(bf.x), 100) # interpolate
             self.hist_canvas.plot(xs, bf.gauss(xs, *bf.ps), pen='b') # plot best fit
-
         # update atom statistics
         self.image_handler.atom[:self.image_handler.im_num] = self.image_handler.counts[
             :self.image_handler.im_num] // self.image_handler.thresh   # update atom presence
@@ -919,23 +944,25 @@ class main_window(QMainWindow):
         below_idxs = np.where(self.image_handler.atom[:self.image_handler.im_num] == 0)[0] # index of images with counts below threshold
         empty_count = np.size(below_idxs) # number of images with counts below threshold
         below = self.image_handler.counts[below_idxs] # counts below threshold
-        loading_prob = np.around(atom_count/self.image_handler.im_num, 4) # loading probability
+        loading_prob = atom_count/self.image_handler.im_num # loading probability
         # use the binomial distribution to get 1 sigma confidence intervals:
         conf = binom_conf_interval(atom_count, atom_count + empty_count, interval='jeffreys') 
-        loading_err = np.around(conf[1] - conf[0], 4)
-
+        uplperr = conf[1] - loading_prob # 1 sigma confidence above mean
+        lolperr = loading_prob - conf[0] # 1 sigma confidence below mean
         # store the calculated histogram statistics as temp, don't add to plot
         if store_stats:
             self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
             self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
             self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
             self.histo_handler.temp_vals['End file #'] = int([x for x in self.image_handler.files if x][-1])
-            self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join([self.roi_x_edit.text(), 
-                                                self.roi_y_edit.text(), self.roi_l_edit.text()])
+            self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join(
+                                    [self.roi_x_edit.text(), self.roi_y_edit.text(), self.roi_l_edit.text()])
             self.histo_handler.temp_vals['Number of images processed'] = self.image_handler.im_num
             self.histo_handler.temp_vals['Counts above : below threshold'] = str(atom_count) + ' : ' + str(empty_count)
-            self.histo_handler.temp_vals['Loading probability'] = loading_prob
-            self.histo_handler.temp_vals['Error in Loading probability'] = loading_err
+            self.histo_handler.temp_vals['Loading probability'] = np.around(loading_prob, 4)
+            self.histo_handler.temp_vals['Error in Loading probability'] = np.around((uplperr + lolperr)*0.5, 4)
+            self.histo_handler.temp_vals['Lower Error in Loading probability'] = np.around(lolperr, 4)
+            self.histo_handler.temp_vals['Upper Error in Loading probability'] = np.around(uplperr, 4)
             self.histo_handler.temp_vals['Background peak count'] = int(best_fits[0].ps[1])
             # assume bias offset is self.bias, readout noise standard deviation Nr
             if self.Nr**2+best_fits[0].ps[1]-self.bias > 0:
@@ -966,14 +993,13 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['Error in Fidelity'] = self.image_handler.err_fidelity
             self.histo_handler.temp_vals['S/N'] = np.around(sep / np.sqrt(bgw**2 + siw**2), 2)
             # fractional error in the error is 1/sqrt(2N - 2)
-            self.histo_handler.temp_vals['Error in S/N'] = np.around(self.histo_handler.temp_vals['S/N'] * np.sqrt((seperr/sep)**2 + 
+            self.histo_handler.temp_vals['Error in S/N'] = np.around(
+                        self.histo_handler.temp_vals['S/N'] * np.sqrt((seperr/sep)**2 + 
                         (bgw**2/(2*empty_count - 2) + siw**2/(2*atom_count - 2))/(bgw**2 + siw**2)), 2)
             self.histo_handler.temp_vals['Threshold'] = int(self.image_handler.thresh)
-
             # display the new statistics in the labels
             for key, val in self.histo_handler.temp_vals.items():
                 self.stat_labels[key].setText(str(val))
-        
         return 1 # fit successful
 
     def update_fit(self, toggle=True):
@@ -981,6 +1007,7 @@ class main_window(QMainWindow):
         peak centres and widths. The peaks are not quite Poissonian because of the
         bias from dark counts. Use the fits to get histogram statistics, then set 
         the threshold to maximise fidelity. Iterate until the threshold converges."""
+        success = 0
         if self.image_handler.im_num > 0: # only update if a histogram exists
             oldthresh = self.image_handler.thresh # store the last value
             diff = 1                              # convergence criterion
@@ -989,22 +1016,17 @@ class main_window(QMainWindow):
                     break
                 success = self.fit_gaussians()
                 diff = abs(oldthresh - self.image_handler.thresh) / float(oldthresh)
-
             if success: # fit_gaussians returns 0 if it fails
                 self.fit_gaussians(store_stats=True) # add new stats to histo_handler
-
-        return success
-                
+        return success  
             
     def fit_bg_gaussian(self, store_stats=False):
         """Assume that there is only one peak in the histogram as there is no single
         atom signal. Fit a Gaussian to this peak."""
         n = self.image_handler.im_num # number of images processed
         c = self.image_handler.counts[:n] # integrated counts
-
         bins, occ, _ = self.image_handler.histogram()  # get histogram
         bin_mid = (bins[1] - bins[0]) * 0.5 # from edge of bin to middle
-        
         # make a Gaussian fit to the peak
         best_fit = fc.fit(bins[:-1]+bin_mid, occ)
         try:
@@ -1015,28 +1037,27 @@ class main_window(QMainWindow):
         # calculate mean and std dev from the data
         mu, sig = np.mean(c), np.std(c, ddof=1)
         # best_fit.ps = [best_fit.ps[0], mu, sig] # use the peak from the fit
-
+        lperr = np.around(binom_conf_interval(0, n, interval='jeffreys')[1], 4) # upper 1 sigma confidence
         # update image handler's values for peak parameters
         self.image_handler.peak_heights = np.array((best_fit.ps[0], 0))
         self.image_handler.peak_counts = np.array((best_fit.ps[1], 0))
         self.image_handler.peak_widths = np.array((best_fit.ps[2], 0))
-
         self.plot_current_hist(self.image_handler.histogram) # clear then update histogram plot
-        
         xs = np.linspace(min(best_fit.x), max(best_fit.x), 100) # interpolate
         self.hist_canvas.plot(xs, best_fit.gauss(xs, *best_fit.ps), pen='b') # plot best fit
-
         # store the calculated histogram statistics as temp, don't add to plot
         self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
         self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
         self.histo_handler.temp_vals['End file #'] = int([x for x in self.image_handler.files if x][-1])
-        self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join([self.roi_x_edit.text(), 
-                                                self.roi_y_edit.text(), self.roi_l_edit.text()])
+        self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join(
+                        [self.roi_x_edit.text(), self.roi_y_edit.text(), self.roi_l_edit.text()])
         self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
         self.histo_handler.temp_vals['Number of images processed'] = n
         self.histo_handler.temp_vals['Counts above : below threshold'] = '0 : ' + str(n)
         self.histo_handler.temp_vals['Loading probability'] = 0
-        self.histo_handler.temp_vals['Error in Loading probability'] = 0
+        self.histo_handler.temp_vals['Error in Loading probability'] = lperr
+        self.histo_handler.temp_vals['Lower Error in Loading probability'] = 0
+        self.histo_handler.temp_vals['Upper Error in Loading probability'] = lperr
         self.histo_handler.temp_vals['Background peak count'] = int(best_fit.ps[1])
         # assume bias offset is self.bias, readout noise standard deviation Nr
         if self.Nr**2+mu-self.bias:
@@ -1060,7 +1081,6 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['S/N'] = 0
         self.histo_handler.temp_vals['Error in S/N'] = 0
         self.histo_handler.temp_vals['Threshold'] = int(self.image_handler.thresh)
-
         # display the new statistics in the labels
         for key, val in self.histo_handler.temp_vals.items():
             self.stat_labels[key].setText(str(val))
@@ -1094,7 +1114,7 @@ class main_window(QMainWindow):
                     err_bars = pg.ErrorBarItem(x=self.histo_handler.xvals, 
                         y=self.histo_handler.yvals, 
                         height=self.histo_handler.stats_dict['Error in '+y_label],
-                        beam=beam_width)
+                        beam=beam_width) # plot with error bars
                     self.varplot_canvas.addItem(err_bars)
             except Exception: pass # probably wrong length of arrays
 
@@ -1104,7 +1124,6 @@ class main_window(QMainWindow):
         self.histo_handler.__init__ () # empty the stored arrays
         self.varplot_canvas.clear()    # clear the displayed plot
         self.hist_num = 0
-
 
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is
@@ -1147,7 +1166,6 @@ class main_window(QMainWindow):
             try: # disconnect all slots
                 self.dir_watcher.event_handler.event_path.disconnect() 
             except Exception: pass # already disconnected
-
             if self.dir_watcher:
                 if self.multirun_save_dir.text() == '':
                     self.choose_multirun_dir()
@@ -1157,6 +1175,10 @@ class main_window(QMainWindow):
                 self.mr['o'], self.mr['h'], self.mr['v'] = 0, 0, 0 # counters for different stages of multirun
                 self.mr['prefix'] = self.measure_edit.text() # prefix for histogram files 
                 self.multirun_switch.setText('Abort')
+                self.multirun_progress.setText(       # update progress label
+                    'User variable: %s, omit %s of %s files, %s of %s histogram files, 0%% complete'%(
+                        self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
+                        self.mr['h'], self.mr['# hist']))
             else: # If dir_watcher isn't running, can't start multirun.
                 self.multirun_switch.setChecked(False)
 
@@ -1164,11 +1186,11 @@ class main_window(QMainWindow):
             self.set_bins() # reconnect the dir_watcher
             self.multirun_switch.setText('Start') # reset button text
             self.multirun_progress.setText(       # update progress label
-            'Stopped at - User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
-                        self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
-                        self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
-                        self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
-                        np.size(self.mr['var list'])))
+                'Stopped at - User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
+                    self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
+                    self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
+                    self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
+                    np.size(self.mr['var list'])))
             # save current progress?
             # self.bins_text_edit(text='reset')     # set histogram bins 
             # self.update_fit()                     # get best fit
@@ -1192,14 +1214,12 @@ class main_window(QMainWindow):
             if self.dir_watcher:
                 self.dir_watcher.event_handler.event_path.connect(self.multirun_step)
 
-
     def swap_signals(self):
         """Disconnect the image_handler process signal from the dir_watcher event
         and (re)connect the update plot"""
         try: # disconnect all slots
             self.dir_watcher.event_handler.event_path.disconnect() 
         except Exception: pass
-       
         if self.dir_watcher and self.thresh_toggle.isChecked():
             self.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
         elif self.dir_watcher and not self.thresh_toggle.isChecked():
@@ -1219,7 +1239,6 @@ class main_window(QMainWindow):
             if self.bin_actions[1].isChecked(): # manual
                 self.swap_signals()  # disconnect image handler, reconnect plot
                 self.bins_text_edit('reset')            
-
             elif self.bin_actions[0].isChecked(): # automatic
                 self.swap_signals()  # disconnect image handler, reconnect plot
                 self.image_handler.bin_array = []
@@ -1227,12 +1246,11 @@ class main_window(QMainWindow):
                     self.plot_current_hist(self.image_handler.histogram)
                 else:
                     self.plot_current_hist(self.image_handler.hist_and_thresh)
-
             elif self.bin_actions[2].isChecked() or self.bin_actions[3].isChecked(): # No Display or No Update
                 try: # disconnect all slots
                     self.dir_watcher.event_handler.event_path.disconnect()
                 except Exception: pass # if it's already been disconnected 
-                
+
                 if self.dir_watcher: # check that the dir watcher exists to prevent crash
                     # set the text of the most recent file
                     self.dir_watcher.event_handler.event_path.connect(self.recent_label.setText) # might need a better label
@@ -1249,12 +1267,10 @@ class main_window(QMainWindow):
         different functions that may or may not update the threshold value."""
         # update the histogram and threshold estimate
         bins, occ, thresh = hist_function()
-        
         self.hist_canvas.clear()
         self.hist_canvas.plot(bins, occ, stepMode=True, pen='k',
                                 fillLevel=0, brush = (220,220,220,220)) # histogram
         self.hist_canvas.plot([thresh]*2, [0, max(occ)], pen='r') # threshold line
-
     
     def update_im(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -1262,7 +1278,6 @@ class main_window(QMainWindow):
         im_vals = self.image_handler.load_full_im(event_path)
         self.im_canvas.setImage(im_vals)
         self.im_hist.setLevels(np.min(im_vals), np.max(im_vals))
-        
         
     def update_plot(self, event_path):
         """Receive the event path emitted from the system event handler signal
@@ -1273,12 +1288,9 @@ class main_window(QMainWindow):
         self.image_handler.process(event_path)
         t2 = time.time()
         self.int_time = t2 - t1
-        
         # display the name of the most recent file
         self.recent_label.setText('Just processed: '+os.path.basename(event_path))
-        
         self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
-
         self.plot_time = time.time() - t2
 
     def update_plot_only(self, event_path):
@@ -1290,10 +1302,8 @@ class main_window(QMainWindow):
         self.image_handler.process(event_path)
         t2 = time.time()
         self.int_time = t2 - t1
-        
         # display the name of the most recent file
         self.recent_label.setText('Just processed: '+os.path.basename(event_path))
-        
         self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
         self.plot_time = time.time() - t2
 
@@ -1308,7 +1318,6 @@ class main_window(QMainWindow):
             if self.mr['o'] < self.mr['# omit']: # don't process, just copy
                 self.recent_label.setText('Just omitted: '+os.path.basename(event_path))
                 self.mr['o'] += 1 # increment counter
-            
             elif self.mr['h'] < self.mr['# hist']: # add to histogram
                 # add the count to the histogram
                 t1 = time.time()
@@ -1317,10 +1326,8 @@ class main_window(QMainWindow):
                 self.int_time = t2 - t1
                 # display the name of the most recent file
                 self.recent_label.setText('Just processed: '+os.path.basename(event_path))
-                
                 self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
                 self.plot_time = time.time() - t2
-
                 self.mr['h'] += 1 # increment counter
 
             if self.mr['o'] == self.mr['# omit'] and self.mr['h'] == self.mr['# hist']:
@@ -1330,35 +1337,38 @@ class main_window(QMainWindow):
                 success = self.update_fit()       # get best fit
                 if not success:                   # if fit fails, use peak search
                     self.update_stats()
-                    print('\nWarning: multi-run fit failed at ' +
+                    print(
+                        '\nWarning: multi-run fit failed at ' +
                         self.mr['prefix'] + '_' + str(self.mr['v']) + '.csv')
-
-                self.save_hist_data(save_file_name=os.path.join(self.multirun_save_dir.text(), 
-                                    self.mr['prefix']) + '_' + str(self.mr['v']) + '.csv', 
-                                    confirm=False)# save histogram
+                self.save_hist_data(
+                    save_file_name=os.path.join(
+                        self.multirun_save_dir.text(), self.mr['prefix']) 
+                            + '_' + str(self.mr['v']) + '.csv', 
+                    confirm=False)# save histogram
                 self.image_handler.reset_arrays() # clear histogram
                 self.mr['v'] += 1 # increment counter
             
         if self.mr['v'] == np.size(self.mr['var list']):
-            self.save_varplot(save_file_name=os.path.join(self.multirun_save_dir.text(), 
-                                    self.mr['prefix']) + '.dat', 
-                                    confirm=False)# save measure file
+            self.save_varplot(
+                save_file_name=os.path.join(
+                    self.multirun_save_dir.text(), self.mr['prefix']) 
+                        + '.dat', 
+                confirm=False)# save measure file
             # reconnect previous signals to dir_watcher
             self.multirun_switch.setChecked(False) # reset multi-run button
             self.multirun_switch.setText('Start')  # reset multi-run button text
             self.set_bins() # reconnects dir_watcher with given histogram binning settings
-
             self.mr['o'], self.mr['h'], self.mr['v'] = 0, 0, 0 # reset counters
             self.mr['measure'] += 1 # completed a measure successfully
             self.mr['prefix'] = str(self.mr['measure']) # suggest new measure as file prefix
             self.measure_edit.setText(self.mr['prefix'])
 
         self.multirun_progress.setText( # update progress label
-                    'User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
-                        self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
-                        self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
-                        self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
-                        np.size(self.mr['var list'])))
+            'User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
+                self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
+                self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
+                self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
+                np.size(self.mr['var list'])))
 
 
     def add_stats_to_plot(self, toggle=True):
@@ -1368,7 +1378,6 @@ class main_window(QMainWindow):
         # append current statistics to the histogram handler's list
         for key in self.stat_labels.keys():
             self.dappend(key, self.stat_labels[key].text())
-        
         self.update_varplot_axes()  # update the plot with the new values
         self.hist_num = np.size(self.histo_handler.stats_dict['Hist ID']) # index for histograms
         # append histogram stats to log file:
@@ -1386,14 +1395,12 @@ class main_window(QMainWindow):
                 'im' takes the image storage path for loading images
                 'log' take the path where log files are saved"""
         date = time.strftime("%Y %B %d", time.localtime()).split(" ") # day, long month, year
-        
         if self.dir_watcher and option=='hist':    # make results path the default
             default_path = self.dir_watcher.results_path + r'\%s\%s\%s'%(date[0], date[1], date[2]) 
         elif self.dir_watcher and option=='im':
             default_path = self.dir_watcher.image_storage_path
         elif option=='log':
             default_path = os.path.dirname(self.log_file_name)
-        
         return default_path
 
 
@@ -1402,14 +1409,14 @@ class main_window(QMainWindow):
         default_path = self.get_default_path(option='im')
         try:
             if 'PyQt4' in sys.modules:
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+                file_name = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
-
+                file_name, _ = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             self.image_handler.set_pic_size(file_name) # sets image handler's pic size
             self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
             self.pic_size_label.setText(str(self.image_handler.pic_size)) # update loaded value
-
         except OSError:
             pass # user cancelled - file not found
 
@@ -1419,10 +1426,11 @@ class main_window(QMainWindow):
         default_path = self.get_default_path(option='im')
         try:
             if 'PyQt4' in sys.modules:
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+                file_name = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
-
+                file_name, _ = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             # get pic size from this image in case the user forgot to set it
             self.image_handler.set_pic_size(file_name) # sets image handler's pic size
             self.pic_size_edit.setText(str(self.image_handler.pic_size)) # update loaded value
@@ -1438,7 +1446,6 @@ class main_window(QMainWindow):
             self.roi.setPos(self.image_handler.xc - self.image_handler.roi_size//2, 
             self.image_handler.yc - self.image_handler.roi_size//2) # set ROI in image display
             self.roi.setSize(self.image_handler.roi_size, self.image_handler.roi_size)
-
         except OSError:
             pass # user cancelled - file not found
 
@@ -1448,25 +1455,23 @@ class main_window(QMainWindow):
         default_path = self.get_default_path()
         try:
             if not save_file_name and 'PyQt4' in sys.modules:
-                save_file_name = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
+                save_file_name = QFileDialog.getSaveFileName(
+                    self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             elif not save_file_name and 'PyQt5' in sys.modules:
-                save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'csv(*.csv);;all (*)')
-            
+                save_file_name, _ = QFileDialog.getSaveFileName(
+                    self, 'Save File', default_path, 'csv(*.csv);;all (*)')
             # don't update the threshold  - trust the user to have already set it
             # if not self.thresh_toggle.isChecked(): # update the threshold unless it's set manually
             #     self.plot_current_hist(self.image_handler.hist_and_thresh)
             self.add_stats_to_plot()
-
             # include most recent histogram stats as the top two lines of the header
             self.image_handler.save_state(save_file_name,
                          hist_header=list(self.histo_handler.temp_vals.keys()),
                          hist_stats=list(self.histo_handler.temp_vals.values())) # save histogram
-            
             try: 
                 hist_num = self.histo_handler.stats_dict['Hist ID'][-1]
             except IndexError: # if there are no values in the stats_dict yet
                 hist_num = -1
-
             if confirm:
                 msg = QMessageBox()
                 msg.setIcon(QMessageBox.Information)
@@ -1474,7 +1479,6 @@ class main_window(QMainWindow):
                         "and appended histogram %s to log file."%hist_num)
                 msg.setStandardButtons(QMessageBox.Ok)
                 msg.exec_()
-
         except OSError:
             pass # user cancelled - file not found
 
@@ -1484,10 +1488,11 @@ class main_window(QMainWindow):
         default_path = self.get_default_path('log')
         try:
             if not save_file_name and 'PyQt4' in sys.modules:
-                save_file_name = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'dat(*.dat);;all (*)')
+                save_file_name = QFileDialog.getSaveFileName(
+                    self, 'Save File', default_path, 'dat(*.dat);;all (*)')
             elif not save_file_name and 'PyQt5' in sys.modules:
-                save_file_name, _ = QFileDialog.getSaveFileName(self, 'Save File', default_path, 'dat(*.dat);;all (*)')
-            
+                save_file_name, _ = QFileDialog.getSaveFileName(
+                    self, 'Save File', default_path, 'dat(*.dat);;all (*)')
             with open(save_file_name, 'w+') as f:
                 f.write('#Single Atom Image Analyser Log File: collects histogram data\n')
                 f.write('#include --[]\n')
@@ -1495,7 +1500,6 @@ class main_window(QMainWindow):
                 for i in range(len(self.histo_handler.stats_dict['Hist ID'])):
                     f.write(','.join(list(map(str, [v[i] for v in 
                         self.histo_handler.stats_dict.values()])))+'\n')
-            
             if confirm:
                 msg = QMessageBox()
                 msg.setIcon(QMessageBox.Information)
@@ -1504,20 +1508,16 @@ class main_window(QMainWindow):
                 msg.exec_()
         except OSError:
             pass # user cancelled - file not found
-
         
     def check_reset(self):
         """Ask the user if they would like to reset the current data stored"""
         reply = QMessageBox.question(self, 'Confirm Data Replacement',
             "Do you want to discard the current data?", 
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
-        
         if reply == QMessageBox.Cancel:
             return 0
-
         elif reply == QMessageBox.Yes:
             self.image_handler.reset_arrays() # gets rid of old data
-
         return 1
 
     def load_empty_hist(self):
@@ -1527,94 +1527,90 @@ class main_window(QMainWindow):
             'Save the current histogram before resetting?',
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
             QMessageBox.Cancel)
-
         if reply == QMessageBox.Cancel:
             return 0
-        
         elif reply == QMessageBox.Yes:
             self.save_hist_data()  # prompt user for file name then save
             self.image_handler.reset_arrays() # get rid of old data
             self.hist_canvas.clear() # remove old histogram from display
-
         elif reply == QMessageBox.No:
             self.image_handler.reset_arrays() # get rid of old data
             self.hist_canvas.clear() # remove old histogram from display
-        
 
     def load_from_files(self, trigger=None):
         """Prompt the user to select image files to process, then sequentially process
         them and update the histogram"""
         default_path = self.get_default_path(option='im')
-            
         if self.check_reset():
             try:
                 self.recent_label.setText('Processing files...') # comes first otherwise not executed
                 if 'PyQt4' in sys.modules:
-                    file_list = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
+                    file_list = QFileDialog.getOpenFileNames(
+                        self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 elif 'PyQt5' in sys.modules:
-                    file_list, _ = QFileDialog.getOpenFileNames(self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
+                    file_list, _ = QFileDialog.getOpenFileNames(
+                        self, 'Select Files', default_path, 'Images(*.asc);;all (*)')
                 for file_name in file_list:
                     try:
                         self.image_handler.process(file_name)
-                        self.recent_label.setText('Just processed: '+os.path.basename(file_name)) # only updates at end of loop
+                        self.recent_label.setText(
+                            'Just processed: '+os.path.basename(file_name)) # only updates at end of loop
                     except:
                         print("\n WARNING: failed to load "+file_name) # probably file size was wrong
-            
                 self.update_stats()
                 if self.recent_label.text == 'Processing files...':
                     self.recent_label.setText('Finished Processing')
-
             except OSError:
                 pass # user cancelled - file not found
 
     def load_from_csv(self, trigger=None):
         """Prompt the user to select a csv file to load histogram data from.
         It must have the specific layout that the image_handler saves in."""
-        default_path = self.get_default_path()
-            
+        default_path = self.get_default_path() 
         if self.check_reset():
             try:
                 # the implementation of QFileDialog changed...
                 if 'PyQt4' in sys.modules: 
-                    file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
+                    file_name = QFileDialog.getOpenFileName(
+                        self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 elif 'PyQt5' in sys.modules:
-                    file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
+                    file_name, _ = QFileDialog.getOpenFileName(
+                        self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
                 self.image_handler.load_from_csv(file_name)
                 self.update_stats()
-
             except OSError:
                 pass # user cancelled - file not found
 
     def load_image(self, trigger=None):
         """Prompt the user to select an image file to display"""
         default_path = self.get_default_path(option='im')
-        
         try:
             if 'PyQt4' in sys.modules:
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+                file_name = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
+                file_name, _ = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'Images (*.asc);;all (*)')
             if file_name:  # avoid crash if the user cancelled
                 self.update_im(file_name)
-
         except OSError:
             pass # user cancelled - file not found
 
     def load_from_log(self, trigger=None):
         """Prompt the user to select the log file then pass it to the histohandler"""
         default_path = self.get_default_path(option='log')
-        
         try:
             # the implementation of QFileDialog changed...
             if 'PyQt4' in sys.modules: 
-                file_name = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
+                file_name = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
             elif 'PyQt5' in sys.modules:
-                file_name, _ = QFileDialog.getOpenFileName(self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
+                file_name, _ = QFileDialog.getOpenFileName(
+                    self, 'Select A File', default_path, 'dat(*.dat);;all (*)')
             success = self.histo_handler.load_from_log(file_name)
             if not success:
                 print('Data was not loaded from the log file.')
             self.update_varplot_axes()
-
         except OSError:
             pass # user cancelled - file not found
 
@@ -1631,37 +1627,43 @@ class main_window(QMainWindow):
         else:
             unit = "s"
         if self.dir_watcher: # this is None if dir_watcher isn't initiated
-            print("\nFile processing event duration: %.4g "%(self.dir_watcher.event_handler.event_t*scale)+unit)
-            print("Most recent idle time between events: %.4g "%(self.dir_watcher.event_handler.idle_t*scale)+unit)
-            print("Image processing duration: %.4g "%(self.int_time*scale)+unit)
-            print("Image plotting duration: %.4g "%(self.plot_time*scale)+unit)
-            print("File writing duration: %.4g "%(self.dir_watcher.event_handler.write_t*scale)+unit)
-            print("File copying duration: %.4g "%(self.dir_watcher.event_handler.copy_t*scale)+unit)
+            print("\nFile processing event duration: %.4g "%(
+                self.dir_watcher.event_handler.event_t*scale)+unit)
+            print("Most recent idle time between events: %.4g "%(
+                self.dir_watcher.event_handler.idle_t*scale)+unit)
+            print("Image processing duration: %.4g "%(
+                self.int_time*scale)+unit)
+            print("Image plotting duration: %.4g "%(
+                self.plot_time*scale)+unit)
+            print("File writing duration: %.4g "%(
+                self.dir_watcher.event_handler.write_t*scale)+unit)
+            print("File copying duration: %.4g "%(
+                self.dir_watcher.event_handler.copy_t*scale)+unit)
         else: 
             print("Initiate the directory watcher before testing timings")
 
     #### #### UI management functions #### #### 
 
-    def closeEvent(self, event):
-        """Prompt user to save data on closing"""
-        reply = QMessageBox.question(self, 'Confirm Action',
-            "Save before closing?", QMessageBox.Yes |
-            QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
-
+    def closeEvent(self, event, confirm=True):
+        """Prompt user to save data on closing
+        Keyword arguments:
+        event   -- the PyQt closeEvent
+        confirm -- toggle whether to display a pop-up window asking to save
+            before closing."""
+        if confirm:
+            reply = QMessageBox.question(self, 'Confirm Action',
+                "Save before closing?", QMessageBox.Yes |
+                QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
+        else: reply = QMessageBox.No
         if reply == QMessageBox.Yes:
             self.save_hist_data()         # save current state
-            
             if self.dir_watcher:          # make sure that the directory watcher stops
                 self.dir_watcher.observer.stop()
-                
             event.accept()
-        
         elif reply == QMessageBox.No:
             if self.dir_watcher: # make sure that the directory watcher stops
                 self.dir_watcher.observer.stop()
-                
             event.accept()
-            
         else:
             event.ignore()        
 
