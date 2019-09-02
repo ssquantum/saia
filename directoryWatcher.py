@@ -51,9 +51,11 @@ class system_event_handler(FileSystemEventHandler, QThread):
         self.init_t = time.time()  # time of initiation: use to test how long it takes to realise an event is started
         self.event_t = 0           # time taken to process the last event
         self.end_t = time.time()   # time at end of event
-        self.idle_t = 0            # time between events
+        self.idle_t  = 0           # time between events
         self.write_t = 0           # time taken to watch a file being written
-        self.copy_t = 0            # time taken to watch a file being copied 
+        self.copy_t  = 0           # time taken to watch a file being copied 
+        self.nfn     = 0           # number to append to file so as not to overwrite
+        self.species = 'Cs-133'    # atomic species to label files with
         
     def wait_for_file(self, file_name, dt=0.01):
         """Make sure that the file has finished being written by waiting until
@@ -89,8 +91,11 @@ class system_event_handler(FileSystemEventHandler, QThread):
         # get Dexter file number  
         self.sync_dexter()
         # copy file with labeling: [species]_[date]_[Dexter file #] ---- this will overwrite if file already exists
-        new_file_name = self.image_storage_path+r'\Cs-133_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
+        new_file_name = os.path.join(self.image_storage_path, self.species)+'_'+self.date+'_'+self.dfn+'.'+event.src_path.split(".")[-1]
         self.copy_t = time.time()
+        if os.path.isfile(new_file_name): # don't overwrite files
+            new_file_name = os.path.join(self.image_storage_path, self.species)+'_'+self.date+'_'+self.dfn+'_'+str(self.nfn)+'.'+event.src_path.split(".")[-1]
+            self.nfn += 1 # always a unique number
         try:
             shutil.copyfile(event.src_path, new_file_name)
         except PermissionError:

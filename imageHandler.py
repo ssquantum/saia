@@ -226,7 +226,7 @@ class image_handler:
             try:
                 lo, hi = min(self.counts[:self.im_num]), max(self.counts[:self.im_num])
                 # scale number of bins with number of files in histogram and with separation of peaks
-                num_bins = int(17 + 5e-5 * self.im_num**2 + ((hi - lo)/hi)**2*20) 
+                num_bins = int(17 + 5e-5 * self.im_num**2 + ((hi - lo)/hi)**2*15) 
             except: 
                 lo, hi, num_bins = 0, 1, 10
             occ, bins = np.histogram(self.counts[:self.im_num], bins=num_bins) # no bins provided by user
@@ -301,23 +301,23 @@ class image_handler:
         data = np.genfromtxt(file_name, delimiter=',')
         with open(file_name, 'r') as f:
             header = f.readline() # check the column headings, might vary between csv files.
-        i = 0
-        self.files = np.concatenate((self.files[:self.im_num], data[:,i], np.array([None]*self.n)))
-        self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
-        self.atom = np.concatenate((self.atom[:self.im_num], data[:,i+2], np.zeros(self.n)))
-        if 'Max Count' in header or 'ROI Centre Count' in header:
-            self.mid_count = np.concatenate((self.mid_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
-            i += 4
-        else: # retain compatability with older csv files that don't contain max count
-            self.mid_count = np.concatenate((self.mid_count[:self.im_num], np.zeros(self.n + np.size(data[:,i]))))
-            i += 3
-        self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,i], np.zeros(self.n)))
-        self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,i+1], np.zeros(self.n)))
-        self.mean_count = np.concatenate((self.mean_count[:self.im_num], data[:,i+2], np.zeros(self.n)))
-        self.std_count = np.concatenate((self.std_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
-        self.im_num += np.size(data[:,0]) # now we have filled this many extra columns.
+        if np.size(data): # check that the file wasn't empty
+            i = 0
+            self.files = np.concatenate((self.files[:self.im_num], data[:,i], np.array([None]*self.n)))
+            self.counts = np.concatenate((self.counts[:self.im_num], data[:,i+1], np.zeros(self.n)))
+            self.atom = np.concatenate((self.atom[:self.im_num], data[:,i+2], np.zeros(self.n)))
+            if 'Max Count' in header or 'ROI Centre Count' in header:
+                self.mid_count = np.concatenate((self.mid_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
+                i += 4
+            else: # retain compatability with older csv files that don't contain max count
+                self.mid_count = np.concatenate((self.mid_count[:self.im_num], np.zeros(self.n + np.size(data[:,i]))))
+                i += 3
+            self.xc_list = np.concatenate((self.xc_list[:self.im_num], data[:,i], np.zeros(self.n)))
+            self.yc_list = np.concatenate((self.yc_list[:self.im_num], data[:,i+1], np.zeros(self.n)))
+            self.mean_count = np.concatenate((self.mean_count[:self.im_num], data[:,i+2], np.zeros(self.n)))
+            self.std_count = np.concatenate((self.std_count[:self.im_num], data[:,i+3], np.zeros(self.n)))
+            self.im_num += np.size(data[:,0]) # now we have filled this many extra columns.
 
-        
     def save_state(self, save_file_name, hist_header=None, hist_stats=None):
         """Save the processed data to csv. 
         

@@ -181,10 +181,9 @@ class reim_window(main_window):
                 # set current file paths
                 for key, value in obj.dir_watcher.dirs_dict.items():
                     obj.path_label[key].setText(value)
-            # connect self.dir_watcher to mw1 signal
+            # connect self.dir_watcher to mw1 signal so that it responds to images
             self.dir_watcher.event_handler.event_path.disconnect()
             self.mw1.dir_watcher.event_handler.event_path.connect(self.update_plot)
-            self.dir_watcher.event_handler.event_path = self.mw1.dir_watcher.event_handler.event_path
             self.remove_im_files() # prompt to remove image files
             date_str = ' '.join([self.date[0]]+self.date[2:])
             pad = 0 # make the message box wider by padding out the first line
@@ -221,13 +220,14 @@ class reim_window(main_window):
         # take the after images when the before images contained atoms
         t1 = time.time()
         self.image_handler.mean_count = ih2.mean_count[atom]
-        self.image_handler.std_count = ih2.std_count[atom]
-        self.image_handler.counts = ih2.counts[atom]
-        self.image_handler.files = ih2.files[atom]
-        self.image_handler.mid_count = ih2.mid_count[atom]
-        self.image_handler.xc_list = ih2.xc_list[atom]
-        self.image_handler.yc_list = ih2.xc_list[atom]
-        self.image_handler.im_num = np.size(self.image_handler.counts)
+        self.image_handler.std_count  = ih2.std_count[atom]
+        self.image_handler.counts     = ih2.counts[atom]
+        self.image_handler.files      = ih2.files[atom]
+        self.image_handler.mid_count  = ih2.mid_count[atom]
+        self.image_handler.xc_list    = ih2.xc_list[atom]
+        self.image_handler.yc_list    = ih2.xc_list[atom]
+        self.image_handler.im_num = np.size(self.image_handler.counts) - 1
+        self.image_handler.atom = ih2.counts[atom] // self.image_handler.thresh
         t2 = time.time()
         self.int_time = t2 - t1
         return t2
@@ -254,63 +254,75 @@ class reim_window(main_window):
         self.plot_time = time.time() - t2
 
     def multirun_step(self, event_path):
-        """Receive event paths emitted from the system event handler signal
+        """A multirun step to control the master and the before/after histograms.
+        mw2 is left to its own multirun_step since the event_path is different.
+        Receive event paths emitted from the system event handler signal
         for the first '# omit' events, only save the files
         then for '# hist' events, add files to a histogram,
-        save the histogram 
-        repeat this for the user variables in the multi-run list,
-        then return to normal operation as set by the histogram binning"""
+        then save the histogram. Repeat this for the user variables in 
+        the multi-run list, then return to normal operation as set by the 
+        histogram binning."""
         if self.mr['v'] < np.size(self.mr['var list']):
+            if self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0: # start processing
+                self.mw2.dir_watcher.event_handler.event_path.connect(self.mw2.update_plot)
             if self.mr['o'] < self.mr['# omit']: # don't process, just copy
-                self.recent_label.setText('Just omitted: '+os.path.basename(event_path))
-                self.mr['o'] += 1 # increment counter
+                for obj in [self, self.mw1, self.mw2]:
+                    obj.recent_label.setText('Just omitted: '+os.path.basename(event_path))
+                    obj.mr['o'] += 1 # increment counter
             elif self.mr['h'] < self.mr['# hist']: # add to histogram
-                self.get_histogram() # update the histogram
+                self.mw1.image_handler.process(event_path)
+                t2 = self.get_histogram() # update the histogram
                 # display the name of the most recent file
-                self.recent_label.setText('Just processed: '+os.path.basename(event_path))
-                self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
-                self.plot_time = time.time() - t2
-                self.mr['h'] += 1 # increment counter
+                for obj in [self, self.mw1]:
+                    obj.recent_label.setText('Just processed: '+os.path.basename(event_path))
+                    obj.plot_current_hist(obj.image_handler.hist_and_thresh) # update the displayed plot
+                    obj.plot_time = time.time() - t2
+                    obj.mr['h'] += 1 # increment counter
+                self.mw2.mr['h'] += 1 # patching in the multi-run
 
             if self.mr['o'] == self.mr['# omit'] and self.mr['h'] == self.mr['# hist']:
-                self.mr['o'], self.mr['h'] = 0, 0 # reset counters
-                self.var_edit.setText(str(self.mr['var list'][self.mr['v']])) # set user variable
-                self.bins_text_edit(text='reset') # set histogram bins 
-                success = self.update_fit()       # get best fit
-                if not success:                   # if fit fails, use peak search
-                    self.update_stats()
-                    print(
-                        '\nWarning: multi-run fit failed at ' +
-                        self.mr['prefix'] + '_' + str(self.mr['v']) + '.csv')
-                self.save_hist_data(
-                    save_file_name=os.path.join(
-                        self.multirun_save_dir.text(), self.mr['prefix']) 
-                        + '_' + str(self.mr['v']) + '.csv', 
-                    confirm=False)# save histogram
-                self.image_handler.reset_arrays() # clear histogram
-                self.mr['v'] += 1 # increment counter
+                for obj in [self.mw2, self.mw1, self]:
+                    obj.mr['o'], obj.mr['h'] = 0, 0 # reset counters
+                    obj.var_edit.setText(str(obj.mr['var list'][obj.mr['v']])) # set user variable
+                    self.get_histogram()    # update the survival histogram
+                    success = obj.update_fit()       # get best fit
+                    if not success:                  # if fit fails, use peak search
+                        obj.update_stats()
+                        print(
+                            '\nWarning: multi-run fit failed at ' +
+                            obj.mr['prefix'] + '_' + str(obj.mr['v']) + '.csv')
+                    obj.save_hist_data(
+                        save_file_name=os.path.join(
+                            obj.multirun_save_dir.text(), obj.mr['prefix']) 
+                            + '_' + str(obj.mr['v']) + '.csv', 
+                        confirm=False)# save histogram
+                    obj.mr['v'] += 1 # increment counter
+                for obj in [self.mw2, self.mw1, self]:
+                    obj.image_handler.reset_arrays() # clear histogram once data processing is done
             
         if self.mr['v'] == np.size(self.mr['var list']):
-            self.save_varplot(
-                save_file_name=os.path.join(
-                    self.multirun_save_dir.text(), self.mr['prefix']) 
-                        + '.dat', 
-                confirm=False)# save measure file
-            # reconnect previous signals to dir_watcher
-            self.multirun_switch.setChecked(False) # reset multi-run button
-            self.multirun_switch.setText('Start')  # reset multi-run button text
-            self.set_bins() # reconnects dir_watcher with given histogram binning settings
-            self.mr['o'], self.mr['h'], self.mr['v'] = 0, 0, 0 # reset counters
-            self.mr['measure'] += 1 # completed a measure successfully
-            self.mr['prefix'] = str(self.mr['measure']) # suggest new measure as file prefix
-            self.measure_edit.setText(self.mr['prefix'])
+            for obj in [self.mw2, self.mw1, self]:
+                obj.save_varplot(
+                    save_file_name=os.path.join(
+                        obj.multirun_save_dir.text(), obj.mr['prefix']) 
+                            + '.dat', 
+                    confirm=False)# save measure file
+                # reconnect previous signals to dir_watcher
+                obj.multirun_switch.setChecked(False) # reset multi-run button
+                obj.multirun_switch.setText('Start')  # reset multi-run button text
+                obj.set_bins() # reconnects dir_watcher with given histogram binning settings
+                obj.mr['o'], obj.mr['h'], obj.mr['v'] = 0, 0, 0 # reset counters
+                obj.mr['measure'] += 1 # completed a measure successfully
+                obj.mr['prefix'] = str(obj.mr['measure']) # suggest new measure as file prefix
+                obj.measure_edit.setText(obj.mr['prefix'])
 
-        self.multirun_progress.setText( # update progress label
-            'User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
-                self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
-                self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
-                self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
-                np.size(self.mr['var list'])))
+        for obj in [self, self.mw1, self.mw2]:
+            obj.multirun_progress.setText( # update progress label
+                'User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
+                    obj.mr['var list'][obj.mr['v']], obj.mr['o'], obj.mr['# omit'],
+                    obj.mr['h'], obj.mr['# hist'], 100 * ((obj.mr['# omit'] + obj.mr['# hist']) * 
+                    obj.mr['v'] + obj.mr['o'] + obj.mr['h']) / (obj.mr['# omit'] + obj.mr['# hist']) / 
+                    np.size(obj.mr['var list'])))
 
     #### #### save and load data functions #### ####
 
@@ -395,9 +407,11 @@ class reim_window(main_window):
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
         edits the text in the line edit widget"""
-        for obj in [self, self.mw1, self.mw2]: # copy across to the SAIA instances
-            obj.image_handler.pic_size = int(text)
-            obj.pic_size_label.setText(str(self.image_handler.pic_size))
+        if text:
+            self.image_handler.pic_size = int(text)
+            self.pic_size_label.setText(str(self.image_handler.pic_size))
+            for obj in [self.mw1, self.mw2]:
+                obj.pic_size_edit.setText(text)
             
     def CCD_stat_edit(self):
         """Update the values used for the EMCCD bias offset and readout noise"""
@@ -465,7 +479,46 @@ class reim_window(main_window):
             obj.roi.setPos(xc - l//2, yc - l//2)
             obj.roi.setSize(l, l)
 
+    def check_reset(self):
+        """Ask the user if they would like to reset the current data stored
+        in the histograms. This resets all of the histograms in one go."""
+        reply = QMessageBox.question(self, 'Confirm Data Replacement',
+            "Do you want to discard all of the current histograms?", 
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
+        if reply == QMessageBox.Cancel:
+            return 0
+        elif reply == QMessageBox.Yes:
+            for obj in [self, self.mw1, self.mw2]:
+                obj.image_handler.reset_arrays() # gets rid of old data
+        return 1
+
+    def choose_multirun_dir(self):
+        """Allow the user to choose the directory where the histogram .csv
+        files and the measure .dat file will be saved as part of the multi-run"""
+        default_path = self.get_default_path(option='hist')
+        try:
+            dir_path = QFileDialog.getExistingDirectory(self, "Select Directory", default_path)
+            for obj in [self, self.mw1, self.mw2]:
+                obj.multirun_save_dir.setText(dir_path)
+        except OSError:
+            pass # user cancelled - file not found
+
     #### #### toggle functions #### #### 
+
+    def swap_signals(self):
+        """Disconnect the image_handler process signal from the dir_watcher event
+        and (re)connect the update plot. The master will trigger on events from
+        mw1 since there are no events in the master's directory. Need to reset 
+        the signal from mw1 entirely otherwise it doesn't connect properly."""
+        try: # disconnect all slots
+            self.dir_watcher.event_handler.event_path.disconnect() 
+        except Exception: pass
+        if self.dir_watcher and self.mw1.dir_watcher and self.thresh_toggle.isChecked():
+            self.mw1.dir_watcher.event_handler.event_path.connect(self.get_histogram)
+            self.mw1.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
+        elif self.dir_watcher and self.mw1.dir_watcher and not self.thresh_toggle.isChecked():
+            self.mw1.dir_watcher.event_handler.event_path.connect(self.get_histogram)
+            self.mw1.dir_watcher.event_handler.event_path.connect(self.update_plot)
 
     def set_bins(self, action=None):
         """Check which of the bin action menu bar options is checked.
@@ -479,12 +532,12 @@ class reim_window(main_window):
         the histogram."""
         if not self.multirun_switch.isChecked(): # don't interrupt multirun
             if self.bin_actions[1].isChecked(): # manual
-                for obj in [self, self.mw1, self.mw2]: # copy across to the SAIA instances
+                for obj in [self.mw1, self.mw2, self]: # copy across to the SAIA instances
                     obj.swap_signals() # won't do anything if dir_watcher isn't running
                     obj.bins_text_edit('reset') # also updates threshold unless user sets it
 
             elif self.bin_actions[0].isChecked(): # automatic
-                for obj in [self, self.mw1, self.mw2]:
+                for obj in [self.mw1, self.mw2, self]:
                     obj.swap_signals()  # disconnect image handler, reconnect plot
                     obj.image_handler.bin_array = []
                     if obj.thresh_toggle.isChecked():
@@ -492,7 +545,7 @@ class reim_window(main_window):
                     else:
                         obj.plot_current_hist(obj.image_handler.hist_and_thresh)
             elif self.bin_actions[2].isChecked() or self.bin_actions[3].isChecked(): # No Display or No Update
-                for obj in [self, self.mw1, self.mw2]:
+                for obj in [self.mw1, self.mw2, self]:
                     try: # disconnect all slots
                         obj.dir_watcher.event_handler.event_path.disconnect()
                     except Exception: pass # if it's already been disconnected 
@@ -505,7 +558,7 @@ class reim_window(main_window):
                             if obj is not self:
                                 obj.dir_watcher.event_handler.event_path.connect(obj.image_handler.process)
                             else:
-                                obj.dir_watcher.event_handler.event_path.connect(self.get_histogram)
+                                self.mw1.dir_watcher.event_handler.event_path.connect(self.get_histogram)
     
     def set_thresh(self, toggle):
         """If the toggle is true, the user supplies the threshold value and it is
@@ -528,42 +581,49 @@ class reim_window(main_window):
         repeat for the user variables in the list. If the button is pressed during
         the multi-run, save the current histogram, save the measure file, then
         return to normal operation of the dir_watcher"""
-        if toggle:
+        if toggle and np.size(self.mr['var list']) > 0:
             self.mw1.measure_edit.setText(self.measure_edit.text() + '_before')
             self.mw2.measure_edit.setText(self.measure_edit.text() + '_after')
+            self.check_reset() # clear histograms
             for obj in [self, self.mw1, self.mw2]:
-                obj.check_reset()
                 try: # disconnect all slots
                     obj.dir_watcher.event_handler.event_path.disconnect() 
                 except Exception: pass # already disconnected
                 if obj.dir_watcher:
+                    obj.plot_current_hist(obj.image_handler.hist_and_thresh)
                     if obj.multirun_save_dir.text() == '':
-                        obj.choose_multirun_dir()
-                    obj.dir_watcher.event_handler.event_path.connect(obj.multirun_step)
+                        obj.choose_multirun_dir() # directory to save histogram csv files to
                     obj.omit_edit.setText(self.omit_edit.text())
                     obj.mr['# omit'] = int(self.omit_edit.text()) # number of files to omit
                     obj.multirun_hist_size.setText(self.multirun_hist_size.text())
                     obj.mr['# hist'] = int(self.multirun_hist_size.text()) # number of files in histogram                
-                    obj.mr['o'], self.mr['h'], self.mr['v'] = 0, 0, 0 # counters for different stages of multirun
+                    obj.mr['o'], obj.mr['h'], obj.mr['v'] = 0, 0, 0 # counters for different stages of multirun
                     obj.mr['prefix'] = obj.measure_edit.text() # prefix for histogram files 
                     obj.multirun_switch.setText('Abort')
+                    obj.multirun_switch.setChecked(True) # keep consistentency
                     obj.multirun_progress.setText(       # update progress label
                         'User variable: %s, omit %s of %s files, %s of %s histogram files, 0%% complete'%(
                             self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
                             self.mr['h'], self.mr['# hist']))
                 else: # If dir_watcher isn't running, can't start multirun.
+                    obj.multirun_switch.setText('Start') # reset button text
                     obj.multirun_switch.setChecked(False)
-
+                    return 0
+            # connect self.dir_watcher to mw1 signal so that it responds to images coming in
+            self.mw1.dir_watcher.event_handler.event_path.connect(self.multirun_step)
+            # the second instance will be connected once the omitted files are done
         else: # cancel the multi-run
             for obj in [self, self.mw1, self.mw2]:
                 obj.set_bins() # reconnect the dir_watcher
                 obj.multirun_switch.setText('Start') # reset button text
-                obj.multirun_progress.setText(       # update progress label
-                    'Stopped at - User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
-                        self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
-                        self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
-                        self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
-                        np.size(self.mr['var list'])))
+                obj.multirun_switch.setChecked(False)# keep consistentency
+                if np.size(self.mr['var list']) > 0:
+                    obj.multirun_progress.setText(       # update progress label
+                        'Stopped at - User variable: %s, omit %s of %s files, %s of %s histogram files, %.3g%% complete'%(
+                            self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
+                            self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
+                            self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
+                            np.size(self.mr['var list'])))
 
     def multirun_resume(self):
         """If the button is clicked, resume the multi-run where it was left off.
@@ -603,6 +663,8 @@ class reim_window(main_window):
             if obj.dir_watcher: # make sure that the directory watcher stops
                 obj.dir_watcher.observer.stop()
             obj.close() # close the window
+        if self.dir_watcher:
+            self.dir_watcher.observer.stop()
         event.accept() # close this main window
         
 ####    ####    ####    #### 

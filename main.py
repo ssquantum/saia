@@ -27,14 +27,14 @@ try:
     from PyQt4.QtGui import (QApplication, QPushButton, QWidget, QLabel, QAction,
             QGridLayout, QMainWindow, QMessageBox, QLineEdit, QIcon, QFileDialog,
             QDoubleValidator, QIntValidator, QComboBox, QMenu, QActionGroup, 
-            QTabWidget, QVBoxLayout, QFont, QRegExpValidator) 
+            QTabWidget, QVBoxLayout, QFont, QRegExpValidator, QInputDialog) 
 except ImportError:
     from PyQt5.QtCore import QThread, pyqtSignal, QEvent, QRegExp
     from PyQt5.QtGui import (QGridLayout, QMessageBox, QLineEdit, QIcon, 
             QFileDialog, QDoubleValidator, QIntValidator, QComboBox, QMenu, 
             QActionGroup, QVBoxLayout, QFont, QRegExpValidator)
     from PyQt5.QtWidgets import (QApplication, QPushButton, QWidget, QTabWidget,
-        QAction, QMainWindow, QLabel)
+        QAction, QMainWindow, QLabel, QInputDialog)
 # change directory to this file's location
 os.chdir(os.path.dirname(os.path.realpath(__file__))) 
 import imageHandler as ih # process images to build up a histogram
@@ -152,9 +152,12 @@ class main_window(QMainWindow):
         hist_menu.addAction(reset_hist)
         
         load_menu = QMenu('Load histogram data', self)  # drop down menu for loading hist
-        load_dir = QAction('From Files', self) # from image files
+        load_dir = QAction('From Files', self) # from image files (using file browser)
         load_dir.triggered.connect(self.load_from_files)
         load_menu.addAction(load_dir)
+        load_fnums = QAction('From File Numbers', self) # from image file numbers
+        load_fnums.triggered.connect(self.load_from_file_nums)
+        load_menu.addAction(load_fnums)
         load_csv = QAction('From csv', self) # from csv of hist data
         load_csv.triggered.connect(self.load_from_csv)
         load_menu.addAction(load_csv)
@@ -194,7 +197,7 @@ class main_window(QMainWindow):
         settings_grid.addWidget(self.pic_size_edit, 0,1, 1,1)
         self.pic_size_edit.setText(str(self.image_handler.pic_size)) # default
         self.pic_size_edit.textChanged[str].connect(self.pic_size_text_edit)
-        self.pic_size_edit.setValidator(double_validator)
+        self.pic_size_edit.setValidator(int_validator)
 
         # get image size from loading an image
         load_im_size = QPushButton('Load size from image', self)
@@ -694,8 +697,9 @@ class main_window(QMainWindow):
     def pic_size_text_edit(self, text):
         """Update the specified size of an image in pixels when the user 
         edits the text in the line edit widget"""
-        self.image_handler.pic_size = int(text)
-        self.pic_size_label.setText(str(self.image_handler.pic_size))
+        if text: # can't convert '' to int
+            self.image_handler.pic_size = int(text)
+            self.pic_size_label.setText(str(self.image_handler.pic_size))
 
     def CCD_stat_edit(self):
         """Update the values used for the EMCCD bias offset and readout noise"""
@@ -787,10 +791,10 @@ class main_window(QMainWindow):
             if new_vals[2] == '' and self.image_handler.im_num > 0: # num bins
                 # min 17 bins. Increase with # images and with separation
                 new_vals[2] = int(17 + 5e-5 * self.image_handler.im_num**2 + 
-                    ((float(new_vals[1]) - float(new_vals[0]))/float(new_vals[1]))**2 * 20)
+                    ((float(new_vals[1]) - float(new_vals[0]))/float(new_vals[1]))**2 * 15)
             if any([v == '' for v in new_vals]) and self.image_handler.im_num == 0:
                 new_vals = [0, 1, 10] # catch all
-            if int(new_vals[2]) < 2:  # 0 bins causes value error
+            if int(new_vals[2] if new_vals[2] else 0) < 2:  # 0 bins causes value error
                 new_vals[2] = 10
             min_bin, max_bin, num_bins = list(map(int, new_vals))
             # set the new values for the bins of the image handler
@@ -844,8 +848,9 @@ class main_window(QMainWindow):
             lolperr = loading_prob - conf[0] # 1 sigma confidence below mean
             # store the calculated histogram statistics as temp, don't add to plot
             self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
-            self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
-            self.histo_handler.temp_vals['End file #'] = int([x for x in self.image_handler.files if x][-1])
+            file_list = [x for x in self.image_handler.files if x]
+            self.histo_handler.temp_vals['Start file #'] = min(map(int, file_list))
+            self.histo_handler.temp_vals['End file #'] = max(map(int, file_list))
             self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join([self.roi_x_edit.text(), 
                                                 self.roi_y_edit.text(), self.roi_l_edit.text()])
             self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
@@ -953,8 +958,9 @@ class main_window(QMainWindow):
         if store_stats:
             self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
             self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
-            self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
-            self.histo_handler.temp_vals['End file #'] = int([x for x in self.image_handler.files if x][-1])
+            file_list = [x for x in self.image_handler.files if x]
+            self.histo_handler.temp_vals['Start file #'] = min(map(int, file_list))
+            self.histo_handler.temp_vals['End file #'] = max(map(int, file_list))
             self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join(
                                     [self.roi_x_edit.text(), self.roi_y_edit.text(), self.roi_l_edit.text()])
             self.histo_handler.temp_vals['Number of images processed'] = self.image_handler.im_num
@@ -1047,8 +1053,9 @@ class main_window(QMainWindow):
         self.hist_canvas.plot(xs, best_fit.gauss(xs, *best_fit.ps), pen='b') # plot best fit
         # store the calculated histogram statistics as temp, don't add to plot
         self.histo_handler.temp_vals['Hist ID'] = int(self.hist_num)
-        self.histo_handler.temp_vals['Start file #'] = int(self.image_handler.files[0])
-        self.histo_handler.temp_vals['End file #'] = int([x for x in self.image_handler.files if x][-1])
+        file_list = [x for x in self.image_handler.files if x]
+        self.histo_handler.temp_vals['Start file #'] = min(map(int, file_list))
+        self.histo_handler.temp_vals['End file #'] = max(map(int, file_list))
         self.histo_handler.temp_vals['ROI xc ; yc ; size'] = ' ; '.join(
                         [self.roi_x_edit.text(), self.roi_y_edit.text(), self.roi_l_edit.text()])
         self.histo_handler.temp_vals['User variable'] = float(self.var_edit.text())
@@ -1129,7 +1136,7 @@ class main_window(QMainWindow):
         """If the toggle is true, the user supplies the threshold value and it is
         kept constant using the image_handler.histogram() function. Otherwise,
         update the threshold with image_handler.hist_and_thresh()"""
-        if toggle:
+        if toggle and not self.multirun_switch.isChecked(): # don't interrupt multirun
             try: # disconnect all slots because it might be connected several times
                 self.dir_watcher.event_handler.event_path.disconnect()
             except Exception: pass # if already disconnected
@@ -1137,7 +1144,7 @@ class main_window(QMainWindow):
                 self.dir_watcher.event_handler.event_path.connect(self.update_plot_only)
 
             self.bins_text_edit('reset') # update histogram
-        else:
+        elif not toggle and not self.multirun_switch.isChecked():
             try: # disconnect all slots (including imshow...)
                 self.dir_watcher.event_handler.event_path.disconnect()
             except Exception: pass # if already disconnected
@@ -1161,8 +1168,9 @@ class main_window(QMainWindow):
         repeat for the user variables in the list. If the button is pressed during
         the multi-run, save the current histogram, save the measure file, then
         return to normal operation of the dir_watcher"""
-        if toggle:
+        if toggle and np.size(self.mr['var list']) > 0:
             self.check_reset()
+            self.plot_current_hist(self.image_handler.histogram)
             try: # disconnect all slots
                 self.dir_watcher.event_handler.event_path.disconnect() 
             except Exception: pass # already disconnected
@@ -1181,7 +1189,6 @@ class main_window(QMainWindow):
                         self.mr['h'], self.mr['# hist']))
             else: # If dir_watcher isn't running, can't start multirun.
                 self.multirun_switch.setChecked(False)
-
         else: # cancel the multi-run
             self.set_bins() # reconnect the dir_watcher
             self.multirun_switch.setText('Start') # reset button text
@@ -1191,15 +1198,6 @@ class main_window(QMainWindow):
                     self.mr['h'], self.mr['# hist'], 100 * ((self.mr['# omit'] + self.mr['# hist']) * 
                     self.mr['v'] + self.mr['o'] + self.mr['h']) / (self.mr['# omit'] + self.mr['# hist']) / 
                     np.size(self.mr['var list'])))
-            # save current progress?
-            # self.bins_text_edit(text='reset')     # set histogram bins 
-            # self.update_fit()                     # get best fit
-            # self.save_hist_data(save_file_name=os.path.join(self.multirun_save_dir.text(), 
-            #                     self.mr['prefix']) + '_' + str(self.mr['v']) + '.csv', 
-            #                     confirm=False)    # save histogram
-            # self.save_varplot(save_file_name=os.path.join(self.multirun_save_dir.text(), 
-            #                     self.mr['prefix']) + '.dat', 
-            #                     confirm=False)    # save measure file
 
     def multirun_resume(self):
         """If the button is clicked, resume the multi-run where it was left off.
@@ -1326,7 +1324,7 @@ class main_window(QMainWindow):
                 self.int_time = t2 - t1
                 # display the name of the most recent file
                 self.recent_label.setText('Just processed: '+os.path.basename(event_path))
-                self.plot_current_hist(self.image_handler.histogram) # update the displayed plot
+                self.plot_current_hist(self.image_handler.hist_and_thresh) # update the displayed plot
                 self.plot_time = time.time() - t2
                 self.mr['h'] += 1 # increment counter
 
@@ -1374,15 +1372,15 @@ class main_window(QMainWindow):
     def add_stats_to_plot(self, toggle=True):
         """Take the current histogram statistics from the Histogram Statistics labels
         and add the values to the variable plot, saving the parameters to the log
-        file at the same time. If any of the labels are empty, do nothing and return -1"""
+        file at the same time. If any of the labels are empty, replace them with 0."""
         # append current statistics to the histogram handler's list
         for key in self.stat_labels.keys():
-            self.dappend(key, self.stat_labels[key].text())
+            self.dappend(key, self.stat_labels[key].text() if self.stat_labels[key].text() else 0)
         self.update_varplot_axes()  # update the plot with the new values
         self.hist_num = np.size(self.histo_handler.stats_dict['Hist ID']) # index for histograms
         # append histogram stats to log file:
         with open(self.log_file_name, 'a') as f:
-            f.write(','.join(self.histo_handler.temp_vals.values()) + '\n')
+            f.write(','.join(list(map(str, self.histo_handler.temp_vals.values()))) + '\n')
 
 
     #### #### save and load data functions #### ####
@@ -1562,6 +1560,39 @@ class main_window(QMainWindow):
                     self.recent_label.setText('Finished Processing')
             except OSError:
                 pass # user cancelled - file not found
+
+    def load_from_file_nums(self, trigger=None):
+        """Prompt the user to enter a range of image file numbers.
+        Use these to select the image files from the current image storage path.
+        Sequentially process the images then update the histogram"""
+        default_range = ''
+        if self.image_handler.im_num > 0: # defualt load all files in folder
+            default_range = '0 - ' + str(self.image_handler.im_num)
+        text, ok = QInputDialog.getText( # user inputs the range
+            self, 'Choose file numbers to load from','Range of file numbers: ',
+            text=default_range)
+        if ok and text and self.dir_watcher: # if user cancels or empty text, do nothing
+            for file_range in text.split(','):
+                minmax = file_range.split('-')
+                if np.size(minmax) == 1: # only entered one file number
+                    file_list = [
+                        os.path.join(self.dir_watcher.image_storage_path, self.dir_watcher.event_handler.species)
+                        + '_' + self.dir_watcher.event_handler.date + '_' + minmax[0].replace(' ','') + '.asc']
+                if np.size(minmax) == 2:
+                    file_list = [
+                        os.path.join(self.dir_watcher.image_storage_path, self.dir_watcher.event_handler.species)
+                        + '_' + self.dir_watcher.event_handler.date + '_' + dfn + '.asc' for dfn in list(map(str, 
+                            range(int(minmax[0]), int(minmax[1]))))] 
+            for file_name in file_list:
+                try:
+                    self.image_handler.process(file_name)
+                    self.recent_label.setText(
+                        'Just processed: '+os.path.basename(file_name)) # only updates at end of loop
+                except:
+                    print("\n WARNING: failed to load "+file_name) # probably file size was wrong
+            self.update_stats()
+            if self.recent_label.text == 'Processing files...':
+                self.recent_label.setText('Finished Processing')
 
     def load_from_csv(self, trigger=None):
         """Prompt the user to select a csv file to load histogram data from.
