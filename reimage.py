@@ -264,6 +264,7 @@ class reim_window(main_window):
         histogram binning."""
         if self.mr['v'] < np.size(self.mr['var list']):
             if self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0: # start processing
+                self.mw2.dir_watcher.event_handler.event_path.disconnect()
                 self.mw2.dir_watcher.event_handler.event_path.connect(self.mw2.update_plot)
             if self.mr['o'] < self.mr['# omit']: # don't process, just copy
                 for obj in [self, self.mw1, self.mw2]:
@@ -392,6 +393,32 @@ class reim_window(main_window):
             for obj in [self, self.mw1, self.mw2]:
                 obj.image_handler.reset_arrays() # get rid of old data
                 obj.hist_canvas.clear() # remove old histogram from display
+
+    def load_from_csv(self, trigger=None):
+        """Prompt the user to select a csv file to load histogram data from.
+        It must have the specific layout that the image_handler saves in.
+        Since the master calculates the histogram from data in mw1 and mw2, 
+        these must be updated appropriately"""
+        default_path = self.get_default_path() 
+        if self.check_reset():
+            try:
+                # the implementation of QFileDialog changed...
+                if 'PyQt4' in sys.modules: 
+                    file_name = QFileDialog.getOpenFileName(
+                        self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
+                elif 'PyQt5' in sys.modules:
+                    file_name, _ = QFileDialog.getOpenFileName(
+                        self, 'Select A File', default_path, 'csv(*.csv);;all (*)')
+                for obj in [self, self.mw1, self.mw2]:
+                    obj.image_handler.load_from_csv(file_name)
+                if self.image_handler.counts:
+                    # make fake data for mw1 so that all files in mw2 are included
+                    self.mw1.image_handler.counts[:self.image_handler.im_num] = np.zeros(
+                        self.image_handler.im_num) + max(self.image_handler.counts)
+                    self.mw1.image_handler.atom = np.ones(self.image_handler.im_num)
+                self.update_stats()
+            except OSError:
+                pass # user cancelled - file not found
 
     #### #### user input functions #### ####
 

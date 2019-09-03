@@ -84,9 +84,9 @@ class main_window(QMainWindow):
         self.init_UI(config_file)  # make the widgets
         self.init_DW(pop_up)  # ask the user if they want to start the dir watcher
         self.init_log() # write header to the log file that collects histograms
-        self.t0 = time.time()  # time of initiation
-        self.int_time = 0      # time taken to process an image
-        self.plot_time = 0     # time taken to plot the graph
+        self.t0 = time.time() # time of initiation
+        self.int_time = 0     # time taken to process an image
+        self.plot_time = 0    # time taken to plot the graph
 
     def init_log(self):
         """Create a directory for today's date as a subdirectory in the log file path
@@ -1712,7 +1712,6 @@ def run():
     main_win.show()
     if standalone: # if an app instance was made, execute it
         sys.exit(app.exec_()) # when the window is closed, the python code also stops
-
             
 if __name__ == "__main__":
     run()
