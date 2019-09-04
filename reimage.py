@@ -263,8 +263,10 @@ class reim_window(main_window):
         the multi-run list, then return to normal operation as set by the 
         histogram binning."""
         if self.mr['v'] < np.size(self.mr['var list']):
-            if self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0: # start processing
-                self.mw2.dir_watcher.event_handler.event_path.disconnect()
+            if self.mr['o'] == self.mr['# omit'] and self.mr['h'] == 0: # start processing
+                try:
+                    self.mw2.dir_watcher.event_handler.event_path.disconnect()
+                except Exception: pass # already disconnected
                 self.mw2.dir_watcher.event_handler.event_path.connect(self.mw2.update_plot)
             if self.mr['o'] < self.mr['# omit']: # don't process, just copy
                 for obj in [self, self.mw1, self.mw2]:
@@ -300,6 +302,9 @@ class reim_window(main_window):
                     obj.mr['v'] += 1 # increment counter
                 for obj in [self.mw2, self.mw1, self]:
                     obj.image_handler.reset_arrays() # clear histogram once data processing is done
+                try: # disconnect mw2 so that it doesn't count the next omitted files
+                    self.mw2.dir_watcher.event_handler.event_path.disconnect()
+                except Exception: pass # already disconnected
             
         if self.mr['v'] == np.size(self.mr['var list']):
             for obj in [self.mw2, self.mw1, self]:
