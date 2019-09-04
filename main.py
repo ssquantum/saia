@@ -1183,6 +1183,7 @@ class main_window(QMainWindow):
                 self.mr['o'], self.mr['h'], self.mr['v'] = 0, 0, 0 # counters for different stages of multirun
                 self.mr['prefix'] = self.measure_edit.text() # prefix for histogram files 
                 self.multirun_switch.setText('Abort')
+                self.clear_varplot() # varplot cleared so it only has multirun data
                 self.multirun_progress.setText(       # update progress label
                     'User variable: %s, omit %s of %s files, %s of %s histogram files, 0%% complete'%(
                         self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],

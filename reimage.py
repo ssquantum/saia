@@ -217,17 +217,18 @@ class reim_window(main_window):
         ih1 = self.mw1.image_handler
         ih2 = self.mw2.image_handler
         atom = (ih1.counts // ih1.thresh).astype(bool)
+        idxs = [i for i, val in enumerate(ih2.files) if any(val == j for j in ih1.files[atom])]
         # take the after images when the before images contained atoms
         t1 = time.time()
-        self.image_handler.mean_count = ih2.mean_count[atom]
-        self.image_handler.std_count  = ih2.std_count[atom]
-        self.image_handler.counts     = ih2.counts[atom]
-        self.image_handler.files      = ih2.files[atom]
-        self.image_handler.mid_count  = ih2.mid_count[atom]
-        self.image_handler.xc_list    = ih2.xc_list[atom]
-        self.image_handler.yc_list    = ih2.xc_list[atom]
+        self.image_handler.mean_count = ih2.mean_count[idxs]
+        self.image_handler.std_count  = ih2.std_count[idxs]
+        self.image_handler.counts     = ih2.counts[idxs]
+        self.image_handler.files      = ih2.files[idxs]
+        self.image_handler.mid_count  = ih2.mid_count[idxs]
+        self.image_handler.xc_list    = ih2.xc_list[idxs]
+        self.image_handler.yc_list    = ih2.xc_list[idxs]
         self.image_handler.im_num = np.size(self.image_handler.counts) - 1
-        self.image_handler.atom = ih2.counts[atom] // self.image_handler.thresh
+        self.image_handler.atom = ih2.counts[idxs] // self.image_handler.thresh
         t2 = time.time()
         self.int_time = t2 - t1
         return t2
@@ -263,7 +264,7 @@ class reim_window(main_window):
         the multi-run list, then return to normal operation as set by the 
         histogram binning."""
         if self.mr['v'] < np.size(self.mr['var list']):
-            if self.mr['o'] == self.mr['# omit'] and self.mr['h'] == 0: # start processing
+            if self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0: # start processing
                 try:
                     self.mw2.dir_watcher.event_handler.event_path.disconnect()
                 except Exception: pass # already disconnected
@@ -633,6 +634,7 @@ class reim_window(main_window):
                     obj.mr['prefix'] = obj.measure_edit.text() # prefix for histogram files 
                     obj.multirun_switch.setText('Abort')
                     obj.multirun_switch.setChecked(True) # keep consistentency
+                    obj.clear_varplot() # clear varplot so that it only has multirun data
                     obj.multirun_progress.setText(       # update progress label
                         'User variable: %s, omit %s of %s files, %s of %s histogram files, 0%% complete'%(
                             self.mr['var list'][self.mr['v']], self.mr['o'], self.mr['# omit'],
