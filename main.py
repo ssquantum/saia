@@ -1567,22 +1567,25 @@ class main_window(QMainWindow):
         Use these to select the image files from the current image storage path.
         Sequentially process the images then update the histogram"""
         default_range = ''
+        species = self.dir_watcher.event_handler.species if self.dir_watcher else 'Cs-133'
+        image_storage_path = self.path_label['Image Storage Path: '].text() + '\%s\%s\%s'%(self.date[3],self.date[2],self.date[0])  
+        date = self.date[0]+self.date[1]+self.date[3]
         if self.image_handler.im_num > 0: # defualt load all files in folder
             default_range = '0 - ' + str(self.image_handler.im_num)
         text, ok = QInputDialog.getText( # user inputs the range
             self, 'Choose file numbers to load from','Range of file numbers: ',
             text=default_range)
-        if ok and text and self.dir_watcher: # if user cancels or empty text, do nothing
+        if ok and text and image_storage_path: # if user cancels or empty text, do nothing
             for file_range in text.split(','):
                 minmax = file_range.split('-')
                 if np.size(minmax) == 1: # only entered one file number
                     file_list = [
-                        os.path.join(self.dir_watcher.image_storage_path, self.dir_watcher.event_handler.species)
-                        + '_' + self.dir_watcher.event_handler.date + '_' + minmax[0].replace(' ','') + '.asc']
+                        os.path.join(image_storage_path, species)
+                        + '_' + date + '_' + minmax[0].replace(' ','') + '.asc']
                 if np.size(minmax) == 2:
                     file_list = [
-                        os.path.join(self.dir_watcher.image_storage_path, self.dir_watcher.event_handler.species)
-                        + '_' + self.dir_watcher.event_handler.date + '_' + dfn + '.asc' for dfn in list(map(str, 
+                        os.path.join(image_storage_path, species)
+                        + '_' + date + '_' + dfn + '.asc' for dfn in list(map(str, 
                             range(int(minmax[0]), int(minmax[1]))))] 
             for file_name in file_list:
                 try:
