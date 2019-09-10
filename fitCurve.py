@@ -8,7 +8,18 @@ from scipy.optimize import curve_fit
 from scipy.special import factorial
 
 class fit:
-    """Collection of common functions for theoretical fits."""
+    """Collection of common functions for theoretical fits.
+    
+    Since good fitting often depends on a initial estimate, 
+    the estGaussParam() function is used estimate parameters 
+    for a Gaussian fit. The getBestFit(fn) function applies
+    the function fn to (xdat, ydat), updating the best fit
+    parameters ps and their errors perrs.
+    Keyword arguments:
+    xdat  -- independent variable array
+    ydat  -- dependent variable array
+    erry  -- errors in the dependent variable array
+    param -- optional best fit parameter estimate"""
     def __init__(self, xdat=0, ydat=0, erry=None, param=None):
         self.x    = xdat   # independent variable
         self.y    = ydat   # measured dependent variable
@@ -31,16 +42,16 @@ class fit:
             xm = self.x[Aind - np.size(self.y[:Aind]) + np.where(self.y[:Aind] - np.min(self.y) < A/2.)[0][-1]]
         e2_width = np.sqrt(2/np.log(2)) * abs(x0 - xm)
         # parameters: amplitude, centre, width, offset
-        self.p0 = [A, x0, e2_width] #, np.min(self.y)]
+        self.p0 = [A, x0, e2_width/2.] #, np.min(self.y)]
     
     def offGauss(self, x, A, x0, wx, y0):
         """Gaussian function centred at x0 with amplitude A, 1/e^2 width wx
         and background offset y0"""
         return A * np.exp( -2 * (x-x0)**2 /wx**2) + y0
 
-    def gauss(self, x, A, x0, wx):
-        """Gaussian function centred at x0 with amplitude A, and 1/e^2 width wx"""
-        return A * np.exp( -2 * (x-x0)**2 /wx**2)
+    def gauss(self, x, A, x0, sig):
+        """Gaussian function centred at x0 with amplitude A, and standard deviation sig"""
+        return A * np.exp( - (x-x0)**2 /sig**2 / 2)
     
     def poisson(self, x, mu, A):
         """Poisson distribution with mean mu, amplitude A"""
