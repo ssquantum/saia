@@ -264,7 +264,8 @@ class reim_window(main_window):
         the multi-run list, then return to normal operation as set by the 
         histogram binning."""
         if self.mr['v'] < np.size(self.mr['var list']):
-            if self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0: # start processing
+            if ((self.mr['o'] == self.mr['# omit']-1 and self.mr['h'] == 0)
+                or (self.mr['# omit'] == 0 and self.mr['h'] == 0)): # start processing
                 try:
                     self.mw2.dir_watcher.event_handler.event_path.disconnect()
                 except Exception: pass # already disconnected
