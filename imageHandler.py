@@ -45,6 +45,7 @@ class image_handler:
         """
     def __init__(self):
         self.delim = ' '                # delimieter to use when opening files
+        self.bias = 697                 # bias offset from the EMCCD
         self.n = 10000                  # length of array for storing counts
         self.counts = np.zeros(self.n)  # integrated counts over the ROI
         self.mid_count = np.zeros(self.n)# count at the centre of the ROI
@@ -127,6 +128,7 @@ class image_handler:
         Keyword arguments:
         im_name    -- absolute path to the image file to load"""
         full_im = self.load_full_im(im_name) # make an array of the image
+        full_im -= self.bias # subtract off bias offset since it's arbitrary
         not_roi = full_im.copy()
         # get the ROI
         if self.roi_size % 2: # odd ROI length (+1 to upper bound)
