@@ -10,6 +10,6 @@ rem -- activate the Python environment to load modules
 call conda activate saiaenv
 
 rem -- now start SAIA
-python main.py
+python reimage.py
 
 call deactivate

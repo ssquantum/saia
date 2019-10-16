@@ -866,7 +866,8 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['Background peak count'] = int(self.image_handler.peak_counts[0])
                 # assume bias offset is self.bias, readout noise standard deviation Nr
                 if self.Nr**2+self.image_handler.peak_counts[0] > 0:
-                    self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+self.image_handler.peak_counts[0])**0.5)
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((
+                        np.prod(self.roi.size())*self.Nr**2+self.image_handler.peak_counts[0])**0.5)
                 else: # don't take the sqrt of a -ve number
                     self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
                 bgw = self.image_handler.peak_widths[0] # fitted background peak width
@@ -877,7 +878,8 @@ class main_window(QMainWindow):
                 self.histo_handler.temp_vals['Signal peak count'] = int(self.image_handler.peak_counts[1])
                 # assume bias offset is self.bias, readout noise standard deviation Nr
                 if self.Nr**2+self.image_handler.peak_counts[1] > 0:
-                    self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((self.Nr**2+self.image_handler.peak_counts[1])**0.5)
+                    self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((
+                        np.prod(self.roi.size())*self.Nr**2+self.image_handler.peak_counts[1])**0.5)
                 else: # don't take the sqrt of a -ve number
                     self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
                 siw = self.image_handler.peak_widths[1] # fitted signal peak width
@@ -974,7 +976,8 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['Background peak count'] = int(best_fits[0].ps[1])
             # assume bias offset is self.bias, readout noise standard deviation Nr
             if self.Nr**2+best_fits[0].ps[1] > 0:
-                self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+best_fits[0].ps[1])**0.5)
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((
+                        np.prod(self.roi.size())*self.Nr**2+best_fits[0].ps[1])**0.5)
             else: # don't take the sqrt of a -ve number
                 self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
             bgw = best_fits[0].ps[2] # fitted background peak width
@@ -985,7 +988,8 @@ class main_window(QMainWindow):
             self.histo_handler.temp_vals['Signal peak count'] = int(best_fits[1].ps[1])
             # assume bias offset is self.bias, readout noise standard deviation Nr
             if self.Nr**2+best_fits[1].ps[1] > 0:
-                self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((self.Nr**2+best_fits[1].ps[1])**0.5)
+                self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = int((
+                        np.prod(self.roi.size())*self.Nr**2+best_fits[1].ps[1])**0.5)
             else:
                 self.histo_handler.temp_vals['sqrt(Nr^2 + Ns)'] = 0
             siw = best_fits[1].ps[2] # fitted signal peak width
@@ -1070,7 +1074,8 @@ class main_window(QMainWindow):
         self.histo_handler.temp_vals['Background peak count'] = int(best_fit.ps[1])
         # assume bias offset is self.bias, readout noise standard deviation Nr
         if self.Nr**2+mu:
-            self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((self.Nr**2+mu)**0.5)
+            self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = int((
+                        np.prod(self.roi.size())*self.Nr**2+mu)**0.5)
         else: # don't take the sqrt of a -ve number
             self.histo_handler.temp_vals['sqrt(Nr^2 + Nbg)'] = 0
         self.histo_handler.temp_vals['Background peak width'] = int(best_fit.ps[2])
