@@ -12,4 +12,4 @@ call conda activate saiaenv
 rem -- now start SAIA
 python main.py
 
-call deactivate
+conda deactivate
